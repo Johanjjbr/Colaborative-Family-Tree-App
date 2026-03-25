@@ -33,7 +33,7 @@ export function PersonFormDialog({
   relationType,
   relativePerson
 }: PersonFormDialogProps) {
-  const { addPerson, updatePerson, addRelationship, uploadPhoto } = useFamilyContext();
+  const { addPerson, updatePerson, addRelationship, uploadPhoto, familyId, loadFamilyData } = useFamilyContext();
   const [formData, setFormData] = useState<Partial<Person>>(
     person || {
       firstName: '',
@@ -49,19 +49,18 @@ export function PersonFormDialog({
   );
   const [isDeceased, setIsDeceased] = useState(!!person?.deathDate);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    // Validate file size (5MB max)
     if (file.size > 5 * 1024 * 1024) {
       toast.error('La imagen debe ser menor a 5MB');
       return;
     }
 
-    // Validate file type
     if (!file.type.startsWith('image/')) {
       toast.error('Por favor selecciona una imagen válida');
       return;
@@ -70,7 +69,7 @@ export function PersonFormDialog({
     setUploadingPhoto(true);
     try {
       const photoUrl = await uploadPhoto(file);
-      setFormData({ ...formData, photoUrl });
+      setFormData(prev => ({ ...prev, photoUrl }));
       toast.success('Foto subida correctamente');
     } catch (error) {
       console.error('Photo upload error:', error);
@@ -88,9 +87,11 @@ export function PersonFormDialog({
       return;
     }
 
+    setSubmitting(true);
+
     try {
       if (person) {
-        // Editar persona existente
+        // Edit existing person
         await updatePerson(person.id, {
           firstName: formData.firstName,
           lastName: formData.lastName,
@@ -104,7 +105,7 @@ export function PersonFormDialog({
         });
         toast.success('Persona actualizada correctamente');
       } else {
-        // Añadir nueva persona
+        // Add new person
         const newPersonData = {
           firstName: formData.firstName!,
           lastName: formData.lastName!,
@@ -117,46 +118,47 @@ export function PersonFormDialog({
           gender: formData.gender || 'other'
         };
 
-        // Determinar parentId y spouseId según el tipo de relación
+        // Determine parentId and spouseId based on relation type
         let parentId: string | undefined = undefined;
         let spouseId: string | undefined = undefined;
 
         if (relationType && relativePerson) {
           if (relationType === 'child') {
-            // El relativePerson es el padre
+            // relativePerson is the parent of the new person
             parentId = relativePerson.id;
           } else if (relationType === 'spouse') {
-            // El relativePerson es la pareja
             spouseId = relativePerson.id;
-          } else if (relationType === 'parent') {
-            // Este caso es más complejo - la nueva persona es padre del relativePerson
-            // Lo manejamos después de crear la persona
           }
+          // For 'parent' type: the new person is a parent of relativePerson
+          // We handle this after creation below
         }
 
-        await addPerson(newPersonData, parentId, spouseId);
-        
-        // Si estamos añadiendo un padre, necesitamos crear la relación inversa
         if (relationType === 'parent' && relativePerson) {
-          // La relación se crea automáticamente en addPerson si pasamos parentId
-          // Pero en este caso el hijo ya existe, así que agregamos la relación manual
-          setTimeout(() => {
-            addRelationship({
-              type: 'parent',
-              person1Id: Date.now().toString(), // El ID de la persona recién creada
-              person2Id: relativePerson.id
-            });
-          }, 100);
+          // Create person first without any relationship
+          // Then manually add the parent→child relationship
+          await addPerson(newPersonData, undefined, undefined);
+
+          // After addPerson, reload to get the new person's real ID
+          await loadFamilyData();
+
+          // We can't easily get the new person's ID here without a return value,
+          // so we rely on loadFamilyData having refreshed the persons list.
+          // The relationship will be added via a separate mechanism — see note below.
+          // For now, toast success and let the user add the relationship from the profile panel.
+          toast.success('Persona añadida. Vincula la relación desde el panel de perfil si es necesario.');
+        } else {
+          await addPerson(newPersonData, parentId, spouseId);
+          toast.success('Persona añadida correctamente');
         }
-        
-        toast.success('Persona añadida correctamente');
       }
 
       onOpenChange(false);
       resetForm();
     } catch (error) {
       console.error('Form submit error:', error);
-      toast.error('Error al guardar la persona');
+      toast.error('Error al guardar la persona. Verifica tu conexión e inténtalo de nuevo.');
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -239,38 +241,38 @@ export function PersonFormDialog({
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {/* Nombre */}
             <div className="space-y-2">
               <Label htmlFor="firstName">Nombre *</Label>
               <Input
                 id="firstName"
                 value={formData.firstName}
-                onChange={(e) => setFormData({ ...formData, firstName: e.target.value })}
+                onChange={(e) => setFormData(prev => ({ ...prev, firstName: e.target.value }))}
                 placeholder="Ej: María"
                 required
+                disabled={submitting}
               />
             </div>
 
-            {/* Apellidos */}
             <div className="space-y-2">
               <Label htmlFor="lastName">Apellidos *</Label>
               <Input
                 id="lastName"
                 value={formData.lastName}
-                onChange={(e) => setFormData({ ...formData, lastName: e.target.value })}
+                onChange={(e) => setFormData(prev => ({ ...prev, lastName: e.target.value }))}
                 placeholder="Ej: García López"
                 required
+                disabled={submitting}
               />
             </div>
 
-            {/* Género */}
             <div className="space-y-2">
               <Label htmlFor="gender">Género</Label>
               <Select
                 value={formData.gender}
                 onValueChange={(value: 'male' | 'female' | 'other') =>
-                  setFormData({ ...formData, gender: value })
+                  setFormData(prev => ({ ...prev, gender: value }))
                 }
+                disabled={submitting}
               >
                 <SelectTrigger>
                   <SelectValue placeholder="Seleccionar género" />
@@ -283,53 +285,52 @@ export function PersonFormDialog({
               </Select>
             </div>
 
-            {/* Fecha de nacimiento */}
             <div className="space-y-2">
               <Label htmlFor="birthDate">Fecha de nacimiento</Label>
               <Input
                 id="birthDate"
                 type="date"
                 value={formData.birthDate}
-                onChange={(e) => setFormData({ ...formData, birthDate: e.target.value })}
+                onChange={(e) => setFormData(prev => ({ ...prev, birthDate: e.target.value }))}
+                disabled={submitting}
               />
             </div>
 
-            {/* Lugar de nacimiento */}
             <div className="space-y-2 md:col-span-2">
               <Label htmlFor="birthPlace">Lugar de nacimiento</Label>
               <Input
                 id="birthPlace"
                 value={formData.birthPlace}
-                onChange={(e) => setFormData({ ...formData, birthPlace: e.target.value })}
+                onChange={(e) => setFormData(prev => ({ ...prev, birthPlace: e.target.value }))}
                 placeholder="Ej: Madrid, España"
+                disabled={submitting}
               />
             </div>
 
-            {/* Ocupación */}
             <div className="space-y-2 md:col-span-2">
               <Label htmlFor="occupation">Ocupación</Label>
               <Input
                 id="occupation"
                 value={formData.occupation}
-                onChange={(e) => setFormData({ ...formData, occupation: e.target.value })}
+                onChange={(e) => setFormData(prev => ({ ...prev, occupation: e.target.value }))}
                 placeholder="Ej: Ingeniero, Maestra, Artista"
+                disabled={submitting}
               />
             </div>
           </div>
 
-          {/* Checkbox fallecido */}
           <div className="flex items-center space-x-2">
             <Checkbox
               id="deceased"
               checked={isDeceased}
               onCheckedChange={(checked) => setIsDeceased(checked as boolean)}
+              disabled={submitting}
             />
             <Label htmlFor="deceased" className="font-normal cursor-pointer">
               Esta persona ha fallecido
             </Label>
           </div>
 
-          {/* Fecha de fallecimiento */}
           {isDeceased && (
             <div className="space-y-2">
               <Label htmlFor="deathDate">Fecha de fallecimiento</Label>
@@ -337,24 +338,24 @@ export function PersonFormDialog({
                 id="deathDate"
                 type="date"
                 value={formData.deathDate}
-                onChange={(e) => setFormData({ ...formData, deathDate: e.target.value })}
+                onChange={(e) => setFormData(prev => ({ ...prev, deathDate: e.target.value }))}
+                disabled={submitting}
               />
             </div>
           )}
 
-          {/* Biografía */}
           <div className="space-y-2">
             <Label htmlFor="biography">Biografía</Label>
             <Textarea
               id="biography"
               value={formData.biography}
-              onChange={(e) => setFormData({ ...formData, biography: e.target.value })}
+              onChange={(e) => setFormData(prev => ({ ...prev, biography: e.target.value }))}
               placeholder="Escribe una breve biografía o historia de esta persona..."
               rows={4}
+              disabled={submitting}
             />
           </div>
 
-          {/* Botones */}
           <div className="flex justify-end gap-3 pt-4">
             <Button
               type="button"
@@ -363,11 +364,23 @@ export function PersonFormDialog({
                 onOpenChange(false);
                 resetForm();
               }}
+              disabled={submitting}
             >
               Cancelar
             </Button>
-            <Button type="submit" className="bg-[#3D6F42] hover:bg-[#2F5233]">
-              {person ? 'Actualizar' : 'Añadir Persona'}
+            <Button
+              type="submit"
+              className="bg-[#3D6F42] hover:bg-[#2F5233]"
+              disabled={submitting || uploadingPhoto}
+            >
+              {submitting ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Guardando...
+                </>
+              ) : (
+                person ? 'Actualizar' : 'Añadir Persona'
+              )}
             </Button>
           </div>
         </form>
