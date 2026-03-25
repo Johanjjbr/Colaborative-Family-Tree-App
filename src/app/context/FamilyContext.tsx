@@ -3,6 +3,7 @@ import { Person, Relationship, Activity } from '../types/family';
 import { mockPersons, mockRelationships, mockActivities, currentUserId } from '../data/mockData';
 import { useAuth } from './AuthContext';
 import { projectId, publicAnonKey } from '/utils/supabase/info';
+import { createClient } from '@supabase/supabase-js';
 
 interface FamilyContextType {
   persons: Person[];
@@ -30,6 +31,11 @@ interface FamilyContextType {
 
 const FamilyContext = createContext<FamilyContextType | undefined>(undefined);
 
+const supabase = createClient(
+  `https://${projectId}.supabase.co`,
+  publicAnonKey
+);
+
 const API_URL = `https://${projectId}.supabase.co/functions/v1/make-server-b3841c63`;
 
 export function FamilyProvider({ children }: { children: ReactNode }) {
@@ -41,6 +47,7 @@ export function FamilyProvider({ children }: { children: ReactNode }) {
   const [familyId, setFamilyId] = useState<string | null>(null);
   const [familyName, setFamilyName] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [useDirectDB, setUseDirectDB] = useState(false); // Fallback to direct DB access
 
   // Load family data when user logs in
   useEffect(() => {
@@ -56,7 +63,7 @@ export function FamilyProvider({ children }: { children: ReactNode }) {
   }, [user, accessToken]);
 
   const loadFamilyData = async () => {
-    if (!accessToken) {
+    if (!accessToken || !user) {
       console.log('No access token, skipping family load');
       return;
     }
@@ -64,77 +71,157 @@ export function FamilyProvider({ children }: { children: ReactNode }) {
     try {
       setLoading(true);
       
-      console.log('Loading family data with token...');
+      console.log('Loading family data...');
       
-      // Get user's family
-      const familyResponse = await fetch(`${API_URL}/families/my-family`, {
-        headers: {
-          'Authorization': `Bearer ${accessToken}`,
-        },
-      });
+      // Try Edge Function first
+      let familyDataLoaded = false;
+      try {
+        const familyResponse = await fetch(`${API_URL}/families/my-family`, {
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+          },
+        });
 
-      const familyData = await familyResponse.json();
-      
-      if (!familyResponse.ok) {
-        // 401 means not authenticated - token might be invalid
-        if (familyResponse.status === 401) {
-          console.error('Authentication failed - token might be invalid');
+        if (familyResponse.ok) {
+          const familyData = await familyResponse.json();
+          
+          if (!familyData.family) {
+            console.log('No family found for user - user needs to create one');
+            setFamilyId(null);
+            setFamilyName(null);
+            setPersons([]);
+            setRelationships([]);
+            setActivities([]);
+            setLoading(false);
+            return;
+          }
+
+          console.log('✓ Family loaded via Edge Function:', familyData.family.name);
+
+          const loadedFamilyId = familyData.family.id;
+          setFamilyId(loadedFamilyId);
+          setFamilyName(familyData.family.name);
+
+          // Load persons
+          const personsResponse = await fetch(`${API_URL}/families/${loadedFamilyId}/persons`, {
+            headers: {
+              'Authorization': `Bearer ${accessToken}`,
+            },
+          });
+          const personsData = await personsResponse.json();
+          setPersons(personsData.persons || []);
+
+          // Load relationships
+          const relationshipsResponse = await fetch(`${API_URL}/families/${loadedFamilyId}/relationships`, {
+            headers: {
+              'Authorization': `Bearer ${accessToken}`,
+            },
+          });
+          const relationshipsData = await relationshipsResponse.json();
+          setRelationships(relationshipsData.relationships || []);
+
+          // Load activities
+          const activitiesResponse = await fetch(`${API_URL}/families/${loadedFamilyId}/activities`, {
+            headers: {
+              'Authorization': `Bearer ${accessToken}`,
+            },
+          });
+          const activitiesData = await activitiesResponse.json();
+          setActivities(activitiesData.activities || []);
+
+          familyDataLoaded = true;
+        }
+      } catch (edgeFunctionError) {
+        console.warn('Edge Function not available, using direct DB access:', edgeFunctionError);
+      }
+
+      // If Edge Function didn't work, use direct DB access
+      if (!familyDataLoaded) {
+        console.log('Loading family data via direct DB access...');
+        
+        // 1. Get family where user is a member
+        const { data: memberData, error: memberError } = await supabase
+          .from('family_members')
+          .select('family_id, families(id, name, owner_id)')
+          .eq('user_id', user.id)
+          .single();
+
+        if (memberError) {
+          if (memberError.code === 'PGRST116') {
+            // No rows returned - user has no family yet
+            console.log('No family found for user via direct DB - user needs to create one');
+            setFamilyId(null);
+            setFamilyName(null);
+            setPersons([]);
+            setRelationships([]);
+            setActivities([]);
+            setLoading(false);
+            return;
+          }
+          console.error('Error loading family members:', memberError);
           setLoading(false);
           return;
         }
+
+        if (!memberData || !memberData.families) {
+          console.log('No family found');
+          setFamilyId(null);
+          setFamilyName(null);
+          setPersons([]);
+          setRelationships([]);
+          setActivities([]);
+          setLoading(false);
+          return;
+        }
+
+        const family = Array.isArray(memberData.families) ? memberData.families[0] : memberData.families;
+        const loadedFamilyId = family.id;
         
-        console.error('Failed to load family:', familyResponse.status, familyData.error);
-        setLoading(false);
-        return;
+        console.log('✓ Family loaded via direct DB:', family.name);
+        setFamilyId(loadedFamilyId);
+        setFamilyName(family.name);
+
+        // 2. Load persons
+        const { data: personsData, error: personsError } = await supabase
+          .from('persons')
+          .select('*')
+          .eq('family_id', loadedFamilyId);
+
+        if (personsError) {
+          console.error('Error loading persons:', personsError);
+        } else {
+          setPersons(personsData || []);
+          console.log('✓ Loaded persons via direct DB:', personsData?.length || 0);
+        }
+
+        // 3. Load relationships
+        const { data: relationshipsData, error: relationshipsError } = await supabase
+          .from('relationships')
+          .select('*')
+          .eq('family_id', loadedFamilyId);
+
+        if (relationshipsError) {
+          console.error('Error loading relationships:', relationshipsError);
+        } else {
+          setRelationships(relationshipsData || []);
+          console.log('✓ Loaded relationships via direct DB:', relationshipsData?.length || 0);
+        }
+
+        // 4. Load activities
+        const { data: activitiesData, error: activitiesError } = await supabase
+          .from('activities')
+          .select('*')
+          .eq('family_id', loadedFamilyId)
+          .order('created_at', { ascending: false })
+          .limit(10);
+
+        if (activitiesError) {
+          console.error('Error loading activities:', activitiesError);
+        } else {
+          setActivities(activitiesData || []);
+          console.log('✓ Loaded activities via direct DB:', activitiesData?.length || 0);
+        }
       }
-
-      if (!familyData.family) {
-        console.log('No family found for user - user needs to create one');
-        // No family yet - this is normal for new users
-        setFamilyId(null);
-        setFamilyName(null);
-        setPersons([]);
-        setRelationships([]);
-        setActivities([]);
-        setLoading(false);
-        return;
-      }
-
-      console.log('✓ Family loaded:', familyData.family.name);
-
-      const loadedFamilyId = familyData.family.id;
-      setFamilyId(loadedFamilyId);
-      setFamilyName(familyData.family.name);
-
-      // Load persons
-      const personsResponse = await fetch(`${API_URL}/families/${loadedFamilyId}/persons`, {
-        headers: {
-          'Authorization': `Bearer ${accessToken}`,
-        },
-      });
-      const personsData = await personsResponse.json();
-      setPersons(personsData.persons || []);
-      console.log('✓ Loaded persons:', personsData.persons?.length || 0);
-
-      // Load relationships
-      const relationshipsResponse = await fetch(`${API_URL}/families/${loadedFamilyId}/relationships`, {
-        headers: {
-          'Authorization': `Bearer ${accessToken}`,
-        },
-      });
-      const relationshipsData = await relationshipsResponse.json();
-      setRelationships(relationshipsData.relationships || []);
-      console.log('✓ Loaded relationships:', relationshipsData.relationships?.length || 0);
-
-      // Load activities
-      const activitiesResponse = await fetch(`${API_URL}/families/${loadedFamilyId}/activities`, {
-        headers: {
-          'Authorization': `Bearer ${accessToken}`,
-        },
-      });
-      const activitiesData = await activitiesResponse.json();
-      setActivities(activitiesData.activities || []);
-      console.log('✓ Loaded activities:', activitiesData.activities?.length || 0);
 
     } catch (error) {
       console.error('Error loading family data:', error);
@@ -144,7 +231,7 @@ export function FamilyProvider({ children }: { children: ReactNode }) {
   };
 
   const createFamily = async (name: string) => {
-    if (!accessToken) {
+    if (!accessToken || !user) {
       console.error('No access token available');
       throw new Error('Not authenticated');
     }
@@ -153,23 +240,82 @@ export function FamilyProvider({ children }: { children: ReactNode }) {
       console.log('Creating family:', name);
       console.log('Access token available:', !!accessToken);
       
-      const response = await fetch(`${API_URL}/families`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${accessToken}`,
-        },
-        body: JSON.stringify({ name }),
-      });
+      // Try Edge Function first
+      try {
+        const response = await fetch(`${API_URL}/families`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${accessToken}`,
+          },
+          body: JSON.stringify({ name }),
+        });
 
-      const data = await response.json();
-      console.log('Create family response:', response.status, data);
-      
-      if (!response.ok) {
-        throw new Error(data.error || 'Failed to create family');
+        const data = await response.json();
+        console.log('Create family response:', response.status, data);
+        
+        if (response.ok) {
+          console.log('Family created successfully via Edge Function, reloading data...');
+          await loadFamilyData();
+          return;
+        }
+        
+        // If Edge Function fails, fall back to direct DB
+        console.warn('Edge Function failed, falling back to direct DB access');
+      } catch (edgeFunctionError) {
+        console.warn('Edge Function not available, using direct DB access:', edgeFunctionError);
       }
 
-      console.log('Family created successfully, reloading data...');
+      // Fallback: Direct Supabase access
+      console.log('Creating family via direct DB access...');
+      
+      // 1. Create family record
+      const { data: familyData, error: familyError } = await supabase
+        .from('families')
+        .insert({
+          name: name,
+          owner_id: user.id
+        })
+        .select()
+        .single();
+
+      if (familyError) {
+        console.error('Failed to create family in DB:', familyError);
+        throw new Error(familyError.message || 'Failed to create family');
+      }
+
+      console.log('Family created in DB:', familyData);
+
+      // 2. Add owner as family member
+      const { error: memberError } = await supabase
+        .from('family_members')
+        .insert({
+          family_id: familyData.id,
+          user_id: user.id,
+          role: 'owner'
+        });
+
+      if (memberError) {
+        console.error('Failed to add family member:', memberError);
+        // Continue anyway, family is created
+      }
+
+      // 3. Create activity record
+      const { error: activityError } = await supabase
+        .from('activities')
+        .insert({
+          family_id: familyData.id,
+          user_id: user.id,
+          activity_type: 'added_person',
+          metadata: { action: 'created_family', family_name: name }
+        });
+
+      if (activityError) {
+        console.error('Failed to create activity:', activityError);
+        // Continue anyway
+      }
+
+      console.log('Family created successfully via direct DB, reloading data...');
       // Reload family data
       await loadFamilyData();
     } catch (error) {

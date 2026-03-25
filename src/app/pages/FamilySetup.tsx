@@ -23,8 +23,14 @@ export default function FamilySetup() {
     }
   }, [familyId, familyLoading, navigate]);
 
-  const handleCreateFamily = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (!familyName.trim()) {
+      toast.error('Por favor ingresa el nombre de tu familia');
+      return;
+    }
+
     setLoading(true);
 
     try {
@@ -33,7 +39,18 @@ export default function FamilySetup() {
       navigate('/');
     } catch (error: any) {
       console.error('Create family error:', error);
-      toast.error(error.message || 'Error al crear el árbol familiar');
+      
+      // Show user-friendly error message
+      const errorMessage = error.message || 'Error al crear el árbol familiar';
+      
+      // Add helpful context
+      if (errorMessage.includes('Failed to create family')) {
+        toast.error('Error al crear el árbol familiar. Verifica que la base de datos esté configurada correctamente. Ver DATABASE_SETUP.md', {
+          duration: 7000
+        });
+      } else {
+        toast.error(errorMessage);
+      }
     } finally {
       setLoading(false);
     }
@@ -63,7 +80,7 @@ export default function FamilySetup() {
         </div>
 
         <Card>
-          <form onSubmit={handleCreateFamily}>
+          <form onSubmit={handleSubmit}>
             <CardHeader>
               <CardTitle>Crear Árbol Familiar</CardTitle>
               <CardDescription>
