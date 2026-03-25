@@ -31,10 +31,10 @@ export function ActivityCard({ activity }: ActivityCardProps) {
     }
   };
 
-  const timeAgo = formatDistanceToNow(new Date(activity.timestamp), {
-    addSuffix: true,
-    locale: es
-  });
+  const date = new Date(activity.timestamp);
+  const timeAgo = isNaN(date.getTime())
+    ? 'hace un momento'
+    : formatDistanceToNow(date, { addSuffix: true, locale: es });
 
   return (
     <div className="flex items-start gap-3 p-3 rounded-lg hover:bg-gray-50 transition-colors">
