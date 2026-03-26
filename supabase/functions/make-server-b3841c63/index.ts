@@ -42,6 +42,15 @@ const mapPersonData = (data: any) => {
   };
 };
 
+// Helper to map camelCase to snake_case for relationships
+const mapRelationshipData = (data: any) => {
+  return {
+    relationship_type: data.type || data.relationship_type,
+    person1_id: data.person1Id || data.person1_id,
+    person2_id: data.person2Id || data.person2_id,
+  };
+};
+
 app.get("/make-server-b3841c63/health", (c) => {
   return c.json({ status: "ok" });
 });
@@ -317,14 +326,18 @@ app.post("/make-server-b3841c63/families/:familyId/relationships", async (c) => 
     const familyId = c.req.param('familyId');
     const relationshipData = await c.req.json();
 
+    // Map camelCase to snake_case
+    const mappedData = {
+      relationship_type: relationshipData.type || relationshipData.relationship_type,
+      person1_id: relationshipData.person1Id || relationshipData.person1_id,
+      person2_id: relationshipData.person2Id || relationshipData.person2_id,
+      family_id: familyId,
+    };
+
     const supabase = getAdminClient();
     const { data: relationship, error } = await supabase
       .from('relationships')
-      .insert({
-        ...relationshipData,
-        family_id: familyId,
-        relationship_type: relationshipData.type || relationshipData.relationship_type,
-      })
+      .insert(mappedData)
       .select()
       .single();
 

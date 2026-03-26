@@ -144,21 +144,26 @@ export function FamilyProvider({ children }: { children: ReactNode }) {
     if (!v?.id) return null;
     return {
       id: v.id,
-      firstName: v.firstName ?? '',
-      lastName: v.lastName ?? '',
-      birthDate: v.birthDate,
-      birthPlace: v.birthPlace,
-      deathDate: v.deathDate,
+      firstName: v.first_name ?? v.firstName ?? '',
+      lastName: v.last_name ?? v.lastName ?? '',
+      birthDate: v.birth_date ?? v.birthDate,
+      birthPlace: v.birth_place ?? v.birthPlace,
+      deathDate: v.death_date ?? v.deathDate,
       occupation: v.occupation,
-      biography: v.biography,
-      photoUrl: v.photoUrl,
+      biography: v.bio ?? v.biography,
+      photoUrl: v.photo_url ?? v.photoUrl,
       gender: v.gender ?? 'other',
     };
   };
 
   const rowToRelationship = (v: any): Relationship | null => {
     if (!v?.id) return null;
-    return { id: v.id, type: v.type, person1Id: v.person1Id, person2Id: v.person2Id };
+    return { 
+      id: v.id, 
+      type: v.relationship_type ?? v.type, 
+      person1Id: v.person1_id ?? v.person1Id, 
+      person2Id: v.person2_id ?? v.person2Id 
+    };
   };
 
   const rowToActivity = (v: any): Activity | null => {
