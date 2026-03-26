@@ -99,7 +99,13 @@ app.get("/make-server-b3841c63/families/:familyId/persons", async (c) => {
     if (!userId) return c.json({ error: 'Unauthorized' }, 401);
 
     const familyId = c.req.param('familyId');
-    const persons = await kv.getByPrefix(`person_${familyId}_`);
+    const supabase = getAdminClient();
+    const { data: persons, error } = await supabase
+      .from('persons')
+      .select('*')
+      .eq('family_id', familyId);
+
+    if (error) throw error;
     return c.json({ persons: persons || [] });
   } catch (error) {
     return c.json({ error: 'Failed to get persons' }, 500);
@@ -114,15 +120,17 @@ app.post("/make-server-b3841c63/families/:familyId/persons", async (c) => {
     const familyId = c.req.param('familyId');
     const personData = await c.req.json();
 
-    const personId = `person_${familyId}_${Date.now()}`;
-    const person = {
-      ...personData,
-      id: personId,
-      familyId,
-      createdAt: new Date().toISOString(),
-    };
+    const supabase = getAdminClient();
+    const { data: person, error } = await supabase
+      .from('persons')
+      .insert({
+        ...personData,
+        family_id: familyId,
+      })
+      .select()
+      .single();
 
-    await kv.set(personId, person);
+    if (error) throw error;
 
     // Log activity
     const activityId = `activity_${familyId}_${Date.now()}`;
@@ -149,12 +157,15 @@ app.put("/make-server-b3841c63/families/:familyId/persons/:personId", async (c) 
     const personId = c.req.param('personId');
     const updates = await c.req.json();
 
-    const existingPerson = await kv.get(personId);
-    if (!existingPerson) return c.json({ error: 'Person not found' }, 404);
+    const supabase = getAdminClient();
+    const { data: updatedPerson, error } = await supabase
+      .from('persons')
+      .update(updates)
+      .eq('id', personId)
+      .select()
+      .single();
 
-    const updatedPerson = { ...existingPerson, ...updates };
-    await kv.set(personId, updatedPerson);
-
+    if (error) throw error;
     return c.json({ person: updatedPerson });
   } catch (error) {
     return c.json({ error: 'Failed to update person' }, 500);
@@ -169,14 +180,23 @@ app.delete("/make-server-b3841c63/families/:familyId/persons/:personId", async (
     const familyId = c.req.param('familyId');
     const personId = c.req.param('personId');
 
-    await kv.del(personId);
+    const supabase = getAdminClient();
+    
+    // Delete relationships first
+    const { error: relError } = await supabase
+      .from('relationships')
+      .delete()
+      .or(`person1_id.eq.${personId},person2_id.eq.${personId}`);
 
-    const relationships = await kv.getByPrefix(`relationship_${familyId}_`);
-    for (const rel of relationships || []) {
-      if (rel.person1Id === personId || rel.person2Id === personId) {
-        await kv.del(rel.id);
-      }
-    }
+    if (relError) throw relError;
+
+    // Delete person
+    const { error: personError } = await supabase
+      .from('persons')
+      .delete()
+      .eq('id', personId);
+
+    if (personError) throw personError;
 
     return c.json({ message: 'Person deleted successfully' });
   } catch (error) {
@@ -192,7 +212,13 @@ app.get("/make-server-b3841c63/families/:familyId/relationships", async (c) => {
     if (!userId) return c.json({ error: 'Unauthorized' }, 401);
 
     const familyId = c.req.param('familyId');
-    const relationships = await kv.getByPrefix(`relationship_${familyId}_`);
+    const supabase = getAdminClient();
+    const { data: relationships, error } = await supabase
+      .from('relationships')
+      .select('*')
+      .or(`person1_id.in.(select id from persons where family_id.eq.${familyId}),person2_id.in.(select id from persons where family_id.eq.${familyId})`);
+
+    if (error) throw error;
     return c.json({ relationships: relationships || [] });
   } catch (error) {
     return c.json({ error: 'Failed to get relationships' }, 500);
@@ -207,14 +233,14 @@ app.post("/make-server-b3841c63/families/:familyId/relationships", async (c) => 
     const familyId = c.req.param('familyId');
     const relationshipData = await c.req.json();
 
-    const relationshipId = `relationship_${familyId}_${Date.now()}`;
-    const relationship = {
-      ...relationshipData,
-      id: relationshipId,
-      familyId,
-    };
+    const supabase = getAdminClient();
+    const { data: relationship, error } = await supabase
+      .from('relationships')
+      .insert(relationshipData)
+      .select()
+      .single();
 
-    await kv.set(relationshipId, relationship);
+    if (error) throw error;
     return c.json({ relationship });
   } catch (error) {
     return c.json({ error: 'Failed to add relationship' }, 500);
