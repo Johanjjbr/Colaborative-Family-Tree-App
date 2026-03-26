@@ -27,6 +27,21 @@ const getUserIdFromAuth = (authHeader: string | undefined): string | null => {
   }
 };
 
+// Helper to map camelCase to snake_case for database
+const mapPersonData = (data: any) => {
+  return {
+    first_name: data.firstName,
+    last_name: data.lastName,
+    birth_date: data.birthDate || null,
+    birth_place: data.birthPlace || null,
+    death_date: data.deathDate || null,
+    gender: data.gender || 'other',
+    photo_url: data.photoUrl || null,
+    bio: data.biography || null,
+    occupation: data.occupation || null,
+  };
+};
+
 app.get("/make-server-b3841c63/health", (c) => {
   return c.json({ status: "ok" });
 });
@@ -50,6 +65,21 @@ app.post("/make-server-b3841c63/auth/signup", async (c) => {
   }
 });
 
+app.post("/make-server-b3841c63/auth/signin", async (c) => {
+  try {
+    const { email, password } = await c.req.json();
+    const supabase = getAdminClient();
+    const { data, error } = await supabase.auth.admin.signInWithPassword({
+      email,
+      password,
+    });
+    if (error) return c.json({ error: error.message }, 400);
+    return c.json({ user: data.user, session: data.session });
+  } catch (error) {
+    return c.json({ error: 'Failed to sign in user' }, 500);
+  }
+});
+
 // ============= FAMILIES =============
 
 app.post("/make-server-b3841c63/families", async (c) => {
@@ -60,15 +90,31 @@ app.post("/make-server-b3841c63/families", async (c) => {
     const { name } = await c.req.json();
     const familyId = `family_${Date.now()}`;
 
-    await kv.set(familyId, {
-      id: familyId,
-      name,
-      ownerId: userId,
-      createdAt: new Date().toISOString(),
-      memberIds: [userId],
-    });
+    const supabase = getAdminClient();
+    
+    // Create family in relational table
+    const { data: family, error: familyError } = await supabase
+      .from('families')
+      .insert({
+        id: familyId,
+        name,
+        owner_id: userId,
+      })
+      .select()
+      .single();
 
-    await kv.set(`family_member_${userId}`, familyId);
+    if (familyError) throw familyError;
+
+    // Add owner as family member
+    const { error: memberError } = await supabase
+      .from('family_members')
+      .insert({
+        family_id: familyId,
+        user_id: userId,
+        role: 'owner',
+      });
+
+    if (memberError) throw memberError;
 
     return c.json({ familyId, message: 'Family tree created successfully' });
   } catch (error) {
@@ -81,10 +127,28 @@ app.get("/make-server-b3841c63/families/my-family", async (c) => {
     const userId = getUserIdFromAuth(c.req.header('Authorization'));
     if (!userId) return c.json({ error: 'Unauthorized' }, 401);
 
-    const familyId = await kv.get(`family_member_${userId}`);
-    if (!familyId) return c.json({ family: null });
+    const supabase = getAdminClient();
+    
+    // Get family from family_members table
+    const { data: memberData, error: memberError } = await supabase
+      .from('family_members')
+      .select('family_id')
+      .eq('user_id', userId)
+      .single();
 
-    const family = await kv.get(familyId);
+    if (memberError || !memberData) {
+      return c.json({ family: null });
+    }
+
+    // Get family details
+    const { data: family, error: familyError } = await supabase
+      .from('families')
+      .select('*')
+      .eq('id', memberData.family_id)
+      .single();
+
+    if (familyError) throw familyError;
+    
     return c.json({ family });
   } catch (error) {
     return c.json({ error: 'Failed to get family' }, 500);
@@ -120,17 +184,26 @@ app.post("/make-server-b3841c63/families/:familyId/persons", async (c) => {
     const familyId = c.req.param('familyId');
     const personData = await c.req.json();
 
+    // Map camelCase to snake_case for database
+    const mappedData = mapPersonData(personData);
+
     const supabase = getAdminClient();
     const { data: person, error } = await supabase
       .from('persons')
       .insert({
-        ...personData,
+        ...mappedData,
         family_id: familyId,
+        created_by: userId,
       })
       .select()
       .single();
 
-    if (error) throw error;
+    if (error) {
+      console.error('Insert person error:', error);
+      throw error;
+    }
+
+    console.log('Person created successfully:', { personId: person.id, familyId, userId });
 
     // Log activity
     const activityId = `activity_${familyId}_${Date.now()}`;
@@ -144,8 +217,9 @@ app.post("/make-server-b3841c63/families/:familyId/persons", async (c) => {
     });
 
     return c.json({ person });
-  } catch (error) {
-    return c.json({ error: 'Failed to add person' }, 500);
+  } catch (error: any) {
+    console.error('Failed to add person:', error.message);
+    return c.json({ error: error.message || 'Failed to add person' }, 500);
   }
 });
 
@@ -157,18 +231,27 @@ app.put("/make-server-b3841c63/families/:familyId/persons/:personId", async (c) 
     const personId = c.req.param('personId');
     const updates = await c.req.json();
 
+    // Map camelCase to snake_case for database
+    const mappedUpdates = mapPersonData(updates);
+
     const supabase = getAdminClient();
     const { data: updatedPerson, error } = await supabase
       .from('persons')
-      .update(updates)
+      .update(mappedUpdates)
       .eq('id', personId)
       .select()
       .single();
 
-    if (error) throw error;
+    if (error) {
+      console.error('Update person error:', error);
+      throw error;
+    }
+
+    console.log('Person updated successfully:', { personId, userId });
     return c.json({ person: updatedPerson });
-  } catch (error) {
-    return c.json({ error: 'Failed to update person' }, 500);
+  } catch (error: any) {
+    console.error('Failed to update person:', error.message);
+    return c.json({ error: error.message || 'Failed to update person' }, 500);
   }
 });
 
@@ -213,10 +296,11 @@ app.get("/make-server-b3841c63/families/:familyId/relationships", async (c) => {
 
     const familyId = c.req.param('familyId');
     const supabase = getAdminClient();
+    
     const { data: relationships, error } = await supabase
       .from('relationships')
       .select('*')
-      .or(`person1_id.in.(select id from persons where family_id.eq.${familyId}),person2_id.in.(select id from persons where family_id.eq.${familyId})`);
+      .eq('family_id', familyId);
 
     if (error) throw error;
     return c.json({ relationships: relationships || [] });
@@ -236,14 +320,24 @@ app.post("/make-server-b3841c63/families/:familyId/relationships", async (c) => 
     const supabase = getAdminClient();
     const { data: relationship, error } = await supabase
       .from('relationships')
-      .insert(relationshipData)
+      .insert({
+        ...relationshipData,
+        family_id: familyId,
+        relationship_type: relationshipData.type || relationshipData.relationship_type,
+      })
       .select()
       .single();
 
-    if (error) throw error;
+    if (error) {
+      console.error('Insert relationship error:', error);
+      throw error;
+    }
+
+    console.log('Relationship created successfully:', { relationshipId: relationship.id, familyId, userId });
     return c.json({ relationship });
-  } catch (error) {
-    return c.json({ error: 'Failed to add relationship' }, 500);
+  } catch (error: any) {
+    console.error('Failed to add relationship:', error.message);
+    return c.json({ error: error.message || 'Failed to add relationship' }, 500);
   }
 });
 

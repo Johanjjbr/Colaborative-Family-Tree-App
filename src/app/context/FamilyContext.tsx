@@ -184,12 +184,14 @@ export function FamilyProvider({ children }: { children: ReactNode }) {
       });
 
       if (!familyResponse.ok) {
+        console.error('Failed to load family:', familyResponse.status);
         setLoading(false);
         return;
       }
 
       const familyData = await familyResponse.json();
       if (!familyData.family) {
+        console.log('No family found for user');
         setFamilyId(null);
         setFamilyName(null);
         setPersons([]);
@@ -200,6 +202,7 @@ export function FamilyProvider({ children }: { children: ReactNode }) {
       }
 
       const loadedFamilyId = familyData.family.id;
+      console.log('Family loaded:', { familyId: loadedFamilyId, name: familyData.family.name });
       setFamilyId(loadedFamilyId);
       setFamilyName(familyData.family.name);
 
@@ -215,6 +218,12 @@ export function FamilyProvider({ children }: { children: ReactNode }) {
         activitiesRes.json(),
       ]);
 
+      console.log('Loaded data:', { 
+        personsCount: personsData.persons?.length,
+        relationshipsCount: relationshipsData.relationships?.length,
+        activitiesCount: activitiesData.activities?.length,
+      });
+
       setPersons(personsData.persons ?? []);
       setRelationships(relationshipsData.relationships ?? []);
       setActivities(activitiesData.activities ?? []);
@@ -223,6 +232,7 @@ export function FamilyProvider({ children }: { children: ReactNode }) {
       setupRealtime(loadedFamilyId);
     } catch (error) {
       console.error('Error loading family data:', error);
+      toast.error('Error al cargar datos de la familia');
     } finally {
       setLoading(false);
     }

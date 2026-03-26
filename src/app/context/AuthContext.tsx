@@ -109,7 +109,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
       }
 
-      // If Edge Function is not available or returns 401, use client-side auth
+      // If Edge Function is not available or returns error, use client-side auth
       if (!useClientSideAuth && response) {
         console.log('Signup response status:', response.status);
 
@@ -118,6 +118,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           console.warn('📝 Falling back to client-side authentication (development mode)');
           console.warn('ℹ️ To use server-side auth, deploy the Edge Function following DEPLOYMENT.md');
           useClientSideAuth = true;
+        } else if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.error || 'Error al crear cuenta en el servidor');
         }
       }
 
@@ -209,33 +212,41 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return;
       }
 
-      // Edge Function is available, process response
-      if (response) {
-        let data;
+      // If we have a server response and it's successful
+      if (response && response.ok) {
+        const data = await response.json();
+        console.log('User created successfully on server:', { userId: data.user.id });
+        
+        // Now try to sign in with the user
         try {
-          const text = await response.text();
-          console.log('Response text:', text);
-
-          if (text) {
-            data = JSON.parse(text);
-            console.log('Signup response data:', data);
-          } else {
-            throw new Error('Respuesta vacía del servidor');
+          const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
+            email,
+            password
+          });
+          
+          if (signInError) {
+            if (signInError.message.includes('Email not confirmed')) {
+              throw new Error('NEEDS_CONFIRMATION');
+            }
+            throw signInError;
           }
-        } catch (parseError) {
-          console.error('Failed to parse response:', parseError);
-          throw new Error(`Error al procesar respuesta del servidor (Status: ${response.status})`);
+          
+          if (signInData.session) {
+            setUser({
+              id: signInData.session.user.id,
+              email: signInData.session.user.email!,
+              firstName: signInData.session.user.user_metadata?.firstName,
+              lastName: signInData.session.user.user_metadata?.lastName,
+            });
+            setAccessToken(signInData.session.access_token);
+          }
+        } catch (signInErr: any) {
+          console.error('Sign in error after server signup:', signInErr);
+          if (signInErr.message === 'NEEDS_CONFIRMATION') {
+            throw signInErr;
+          }
+          throw new Error('Error al iniciar sesión después de crear cuenta');
         }
-
-        if (!response.ok) {
-          const errorMessage = data?.error || `Error del servidor: ${response.status}`;
-          console.error('Signup failed:', errorMessage);
-          throw new Error(errorMessage);
-        }
-
-        console.log('User created successfully via Edge Function, attempting sign in...');
-        // Now sign in with the created credentials
-        await signIn(email, password);
       }
     } catch (error: any) {
       console.error('Signup error:', error);
@@ -245,6 +256,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signIn = async (email: string, password: string) => {
     try {
+      // First try with Edge Function if available
+      try {
+        const response = await fetch(`${API_URL}/auth/signin`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password }),
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          if (data.session) {
+            setUser({
+              id: data.session.user.id,
+              email: data.session.user.email!,
+              firstName: data.session.user.user_metadata?.firstName,
+              lastName: data.session.user.user_metadata?.lastName,
+            });
+            setAccessToken(data.session.access_token);
+            return;
+          }
+        }
+      } catch (err) {
+        console.warn('Edge Function signin not available, trying client-side');
+      }
+
+      // Fallback to client-side auth
       const { data, error } = await supabase.auth.signInWithPassword({
         email,
         password,
