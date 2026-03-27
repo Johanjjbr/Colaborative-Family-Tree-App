@@ -108,15 +108,15 @@ export function FamilyProvider({ children }: { children: ReactNode }) {
 
   const addPerson = async (person: Omit<Person, 'id'>, parentId?: string, spouseId?: string): Promise<Person> => {
     if (!accessToken || !familyId) {
-      // Fallback local state
+      // Fallback to local state for demo
       const newPerson: Person = { ...person, id: Date.now().toString() };
       setPersons(prev => [...prev, newPerson]);
       if (parentId) {
-        const rel: Relationship = { id: Date.now().toString(), type: 'parent', person1Id: parentId, person2Id: newPerson.id };
+        const rel: Relationship = { id: `${Date.now()}_p`, type: 'parent', person1Id: parentId, person2Id: newPerson.id };
         setRelationships(prev => [...prev, rel]);
       }
       if (spouseId) {
-        const rel: Relationship = { id: Date.now().toString(), type: 'spouse', person1Id: newPerson.id, person2Id: spouseId };
+        const rel: Relationship = { id: `${Date.now()}_s`, type: 'spouse', person1Id: newPerson.id, person2Id: spouseId };
         setRelationships(prev => [...prev, rel]);
       }
       return newPerson;
@@ -132,10 +132,9 @@ export function FamilyProvider({ children }: { children: ReactNode }) {
 
     const createdPerson: Person = data.person;
 
-    // Update local state immediately (optimistic)
+    // Optimistically update local state
     setPersons(prev => [...prev, createdPerson]);
 
-    // Add relationships
     if (parentId) {
       await addRelationship({ type: 'parent', person1Id: parentId, person2Id: createdPerson.id });
     }
@@ -216,7 +215,7 @@ export function FamilyProvider({ children }: { children: ReactNode }) {
     });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || 'Failed to upload photo');
-    return data.photo_url;
+    return data.photoUrl;
   };
 
   const getPersonById = (id: string) => persons.find(p => p.id === id);
