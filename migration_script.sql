@@ -18,14 +18,14 @@ SELECT
       substring(key from position('_' in key) + 1)
     ELSE key 
   END as id,
-  value->>'firstName' as first_name,
-  value->>'lastName' as last_name,
+  value->>'first_name' as first_name,
+  value->>'last_name' as last_name,
   (value->>'birthDate')::date as birth_date,
   value->>'birthPlace' as birth_place,
   (value->>'deathDate')::date as death_date,
   value->>'occupation' as occupation,
   value->>'biography' as biography,
-  value->>'photoUrl' as photo_url,
+  value->>'photo_url' as photo_url,
   value->>'gender' as gender,
   -- Extraer familyId del key
   CASE 

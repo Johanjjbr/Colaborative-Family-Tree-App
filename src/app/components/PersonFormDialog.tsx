@@ -2,7 +2,11 @@ import React, { useState, useRef } from 'react';
 import { Person } from '../types/family';
 import { useFamilyContext } from '../context/FamilyContext';
 import {
-  Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
 } from './ui/dialog';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -22,109 +26,167 @@ interface PersonFormDialogProps {
   relativePerson?: Person;
 }
 
-export function PersonFormDialog({ open, onOpenChange, person, relationType, relativePerson }: PersonFormDialogProps) {
+export function PersonFormDialog({
+  open,
+  onOpenChange,
+  person,
+  relationType,
+  relativePerson
+}: PersonFormDialogProps) {
   const { addPerson, updatePerson, addRelationship, uploadPhoto } = useFamilyContext();
-
-  const blank = { firstName: '', lastName: '', birthDate: '', birthPlace: '', occupation: '', biography: '', deathDate: '', photoUrl: '', gender: 'other' as const };
-  const [formData, setFormData] = useState<Partial<Person>>(person || blank);
+  const [formData, setFormData] = useState<Partial<Person>>(
+    person || {
+      first_name: '',
+      last_name: '',
+      birthDate: '',
+      birthPlace: '',
+      occupation: '',
+      biography: '',
+      deathDate: '',
+      photo_url: '',
+      gender: 'other'
+    }
+  );
   const [isDeceased, setIsDeceased] = useState(!!person?.deathDate);
+  const [loading, setLoading] = useState(false);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
-  const [saving, setSaving] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-
-  const reset = () => { setFormData(blank); setIsDeceased(false); };
 
   const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     if (file.size > 5 * 1024 * 1024) { toast.error('La imagen debe ser menor a 5MB'); return; }
-    if (!file.type.startsWith('image/')) { toast.error('Selecciona una imagen válida'); return; }
+    if (!file.type.startsWith('image/')) { toast.error('Por favor selecciona una imagen válida'); return; }
     setUploadingPhoto(true);
     try {
-      const url = await uploadPhoto(file);
-      setFormData(f => ({ ...f, photoUrl: url }));
-      toast.success('Foto subida');
-    } catch { toast.error('Error al subir la foto'); }
-    finally { setUploadingPhoto(false); }
+      const photo_url = await uploadPhoto(file);
+      setFormData(prev => ({ ...prev, photo_url }));
+      toast.success('Foto subida correctamente');
+    } catch (error) {
+      toast.error('Error al subir la foto');
+    } finally {
+      setUploadingPhoto(false);
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.firstName || !formData.lastName) { toast.error('Completa nombre y apellido'); return; }
-    setSaving(true);
+    if (!formData.first_name || !formData.last_name) {
+      toast.error('Por favor completa el nombre y apellido');
+      return;
+    }
+    setLoading(true);
     try {
-      const personPayload = {
-        firstName: formData.firstName!,
-        lastName: formData.lastName!,
-        birthDate: formData.birthDate,
-        birthPlace: formData.birthPlace,
-        deathDate: isDeceased ? formData.deathDate : undefined,
-        occupation: formData.occupation,
-        biography: formData.biography,
-        photoUrl: formData.photoUrl,
-        gender: (formData.gender || 'other') as 'male' | 'female' | 'other',
-      };
-
       if (person) {
-        await updatePerson(person.id, personPayload);
-        toast.success('Persona actualizada');
+        // Edit existing person
+        await updatePerson(person.id, {
+          first_name: formData.first_name,
+          last_name: formData.last_name,
+          birthDate: formData.birthDate,
+          birthPlace: formData.birthPlace,
+          deathDate: isDeceased ? formData.deathDate : undefined,
+          occupation: formData.occupation,
+          biography: formData.biography,
+          photo_url: formData.photo_url,
+          gender: formData.gender || 'other'
+        });
+        toast.success('Persona actualizada correctamente');
       } else {
-        if (!relationType || !relativePerson) {
-          // Sin relación
-          await addPerson(personPayload);
-        } else if (relationType === 'child') {
-          // relativePerson = padre/madre → nueva persona es hijo/a
-          await addPerson(personPayload, relativePerson.id, undefined);
-        } else if (relationType === 'spouse') {
-          // relativePerson = la pareja → nueva persona se casa con ella
-          await addPerson(personPayload, undefined, relativePerson.id);
-        } else if (relationType === 'parent') {
-          // relativePerson = hijo/a existente → nueva persona es padre/madre
-          // Creamos la persona primero y obtenemos su ID real del servidor
-          const created = await addPerson(personPayload, undefined, undefined);
-          // Relación: created (padre) → relativePerson (hijo)
-          await addRelationship({ type: 'parent', person1Id: created.id, person2Id: relativePerson.id });
-        }
-        toast.success('Persona añadida');
-      }
+        // Add new person
+        const newPersonData = {
+          first_name: formData.first_name!,
+          last_name: formData.last_name!,
+          birthDate: formData.birthDate,
+          birthPlace: formData.birthPlace,
+          deathDate: isDeceased ? formData.deathDate : undefined,
+          occupation: formData.occupation,
+          biography: formData.biography,
+          photo_url: formData.photo_url || '',
+          gender: (formData.gender || 'other') as 'male' | 'female' | 'other'
+        };
 
+        // Determine relationships based on relationType
+        // relationType === 'child': relativePerson is the PARENT of the new person
+        // relationType === 'spouse': relativePerson is the SPOUSE of the new person
+        // relationType === 'parent': relativePerson is the CHILD of the new person (new person is a parent)
+
+        let parentId: string | undefined;
+        let spouseId: string | undefined;
+
+        if (relationType === 'child' && relativePerson) {
+          // The relative is the parent, new person is the child
+          parentId = relativePerson.id;
+        } else if (relationType === 'spouse' && relativePerson) {
+          spouseId = relativePerson.id;
+        }
+        // For 'parent' relationType, we handle it separately after creation
+
+        // addPerson now returns the created person
+        const createdPerson = await addPerson(newPersonData, parentId, spouseId);
+
+        // If adding a parent: new person IS the parent, relativePerson is the child
+        if (relationType === 'parent' && relativePerson && createdPerson) {
+          await addRelationship({
+            type: 'parent',
+            person1Id: createdPerson.id,  // parent
+            person2Id: relativePerson.id  // child
+          });
+        }
+
+        toast.success('Persona añadida correctamente');
+      }
       onOpenChange(false);
-      reset();
-    } catch (err) {
-      console.error(err);
+      resetForm();
+    } catch (error) {
+      console.error('Form submit error:', error);
       toast.error('Error al guardar la persona');
     } finally {
-      setSaving(false);
+      setLoading(false);
     }
   };
 
-  const title = () => {
+  const resetForm = () => {
+    setFormData({
+      first_name: '', last_name: '', birthDate: '', birthPlace: '',
+      occupation: '', biography: '', deathDate: '', photo_url: '', gender: 'other'
+    });
+    setIsDeceased(false);
+  };
+
+  const getDialogTitle = () => {
     if (person) return 'Editar Persona';
-    if (relationType === 'parent') return `Añadir Padre/Madre de ${relativePerson?.firstName}`;
-    if (relationType === 'spouse') return `Añadir Pareja de ${relativePerson?.firstName}`;
-    if (relationType === 'child') return `Añadir Hijo/a de ${relativePerson?.firstName}`;
+    if (relationType === 'parent') return `Añadir Padre/Madre de ${relativePerson?.first_name}`;
+    if (relationType === 'spouse') return `Añadir Pareja de ${relativePerson?.first_name}`;
+    if (relationType === 'child') return `Añadir Hijo/a de ${relativePerson?.first_name}`;
     return 'Añadir Nueva Persona';
   };
 
-  const initials = (formData.firstName || formData.lastName)
-    ? `${formData.firstName?.[0] ?? ''}${formData.lastName?.[0] ?? ''}`.toUpperCase()
-    : null;
+  const getInitials = () => {
+    if (!formData.first_name && !formData.last_name) return null;
+    return `${formData.first_name?.[0] || ''}${formData.last_name?.[0] || ''}`.toUpperCase();
+  };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>{title()}</DialogTitle>
-          <DialogDescription>Completa la información de la persona.</DialogDescription>
+          <DialogTitle>{getDialogTitle()}</DialogTitle>
+          <DialogDescription>
+            Completa la información de la persona. Los campos marcados con * son obligatorios.
+          </DialogDescription>
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="space-y-6">
-          {/* Photo */}
-          <div className="flex flex-col items-center gap-3">
+          {/* Avatar Upload */}
+          <div className="flex flex-col items-center gap-4">
             <Avatar className="w-24 h-24">
-              {formData.photoUrl
-                ? <AvatarImage src={formData.photoUrl} />
-                : <AvatarFallback className="bg-[#3D6F42] text-white text-2xl">{initials || <User className="w-10 h-10" />}</AvatarFallback>}
+              {formData.photo_url ? (
+                <AvatarImage src={formData.photo_url} />
+              ) : (
+                <AvatarFallback className="bg-[#3D6F42] text-white text-2xl">
+                  {getInitials() || <User className="w-12 h-12" />}
+                </AvatarFallback>
+              )}
             </Avatar>
             <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handlePhotoUpload} />
             <Button type="button" variant="outline" size="sm" onClick={() => fileInputRef.current?.click()} disabled={uploadingPhoto}>
@@ -134,17 +196,17 @@ export function PersonFormDialog({ open, onOpenChange, person, relationType, rel
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-2">
-              <Label>Nombre *</Label>
-              <Input value={formData.firstName ?? ''} onChange={e => setFormData(f => ({ ...f, firstName: e.target.value }))} placeholder="María" required />
+              <Label htmlFor="first_name">Nombre *</Label>
+              <Input id="first_name" value={formData.first_name} onChange={(e) => setFormData(prev => ({ ...prev, first_name: e.target.value }))} placeholder="Ej: María" required />
             </div>
             <div className="space-y-2">
-              <Label>Apellidos *</Label>
-              <Input value={formData.lastName ?? ''} onChange={e => setFormData(f => ({ ...f, lastName: e.target.value }))} placeholder="García López" required />
+              <Label htmlFor="last_name">Apellidos *</Label>
+              <Input id="last_name" value={formData.last_name} onChange={(e) => setFormData(prev => ({ ...prev, last_name: e.target.value }))} placeholder="Ej: García López" required />
             </div>
             <div className="space-y-2">
-              <Label>Género</Label>
-              <Select value={formData.gender} onValueChange={v => setFormData(f => ({ ...f, gender: v as any }))}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
+              <Label htmlFor="gender">Género</Label>
+              <Select value={formData.gender} onValueChange={(value: 'male' | 'female' | 'other') => setFormData(prev => ({ ...prev, gender: value }))}>
+                <SelectTrigger><SelectValue placeholder="Seleccionar género" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="male">Masculino</SelectItem>
                   <SelectItem value="female">Femenino</SelectItem>
@@ -153,39 +215,42 @@ export function PersonFormDialog({ open, onOpenChange, person, relationType, rel
               </Select>
             </div>
             <div className="space-y-2">
-              <Label>Fecha de nacimiento</Label>
-              <Input type="date" value={formData.birthDate ?? ''} onChange={e => setFormData(f => ({ ...f, birthDate: e.target.value }))} />
+              <Label htmlFor="birthDate">Fecha de nacimiento</Label>
+              <Input id="birthDate" type="date" value={formData.birthDate} onChange={(e) => setFormData(prev => ({ ...prev, birthDate: e.target.value }))} />
             </div>
             <div className="space-y-2 md:col-span-2">
-              <Label>Lugar de nacimiento</Label>
-              <Input value={formData.birthPlace ?? ''} onChange={e => setFormData(f => ({ ...f, birthPlace: e.target.value }))} placeholder="Madrid, España" />
+              <Label htmlFor="birthPlace">Lugar de nacimiento</Label>
+              <Input id="birthPlace" value={formData.birthPlace} onChange={(e) => setFormData(prev => ({ ...prev, birthPlace: e.target.value }))} placeholder="Ej: Caracas, Venezuela" />
             </div>
             <div className="space-y-2 md:col-span-2">
-              <Label>Ocupación</Label>
-              <Input value={formData.occupation ?? ''} onChange={e => setFormData(f => ({ ...f, occupation: e.target.value }))} placeholder="Ingeniero, Maestra..." />
+              <Label htmlFor="occupation">Ocupación</Label>
+              <Input id="occupation" value={formData.occupation} onChange={(e) => setFormData(prev => ({ ...prev, occupation: e.target.value }))} placeholder="Ej: Médico, Maestra, Ingeniero" />
             </div>
           </div>
 
           <div className="flex items-center space-x-2">
-            <Checkbox id="deceased" checked={isDeceased} onCheckedChange={v => setIsDeceased(!!v)} />
+            <Checkbox id="deceased" checked={isDeceased} onCheckedChange={(checked) => setIsDeceased(checked as boolean)} />
             <Label htmlFor="deceased" className="font-normal cursor-pointer">Esta persona ha fallecido</Label>
           </div>
+
           {isDeceased && (
             <div className="space-y-2">
-              <Label>Fecha de fallecimiento</Label>
-              <Input type="date" value={formData.deathDate ?? ''} onChange={e => setFormData(f => ({ ...f, deathDate: e.target.value }))} />
+              <Label htmlFor="deathDate">Fecha de fallecimiento</Label>
+              <Input id="deathDate" type="date" value={formData.deathDate} onChange={(e) => setFormData(prev => ({ ...prev, deathDate: e.target.value }))} />
             </div>
           )}
 
           <div className="space-y-2">
-            <Label>Biografía</Label>
-            <Textarea value={formData.biography ?? ''} onChange={e => setFormData(f => ({ ...f, biography: e.target.value }))} placeholder="Escribe una breve biografía..." rows={3} />
+            <Label htmlFor="biography">Biografía</Label>
+            <Textarea id="biography" value={formData.biography} onChange={(e) => setFormData(prev => ({ ...prev, biography: e.target.value }))} placeholder="Escribe una breve historia de esta persona..." rows={4} />
           </div>
 
-          <div className="flex justify-end gap-3 pt-2">
-            <Button type="button" variant="outline" onClick={() => { onOpenChange(false); reset(); }}>Cancelar</Button>
-            <Button type="submit" className="bg-[#3D6F42] hover:bg-[#2F5233]" disabled={saving}>
-              {saving ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Guardando...</> : person ? 'Actualizar' : 'Añadir Persona'}
+          <div className="flex justify-end gap-3 pt-4">
+            <Button type="button" variant="outline" onClick={() => { onOpenChange(false); resetForm(); }} disabled={loading}>
+              Cancelar
+            </Button>
+            <Button type="submit" className="bg-[#3D6F42] hover:bg-[#2F5233]" disabled={loading}>
+              {loading ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />{person ? 'Actualizando...' : 'Añadiendo...'}</> : (person ? 'Actualizar' : 'Añadir Persona')}
             </Button>
           </div>
         </form>

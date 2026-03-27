@@ -5,8 +5,10 @@ import * as kv from "./kv_store.tsx";
 
 const app = new Hono();
 
+// Enable CORS
 app.use("*", cors());
 
+// Initialize Supabase admin client
 const getAdminClient = () => {
   return createClient(
     Deno.env.get('SUPABASE_URL') ?? '',
@@ -14,461 +16,696 @@ const getAdminClient = () => {
   );
 };
 
+// Simple auth - just verify that a user ID is provided
 const getUserIdFromAuth = (authHeader: string | undefined): string | null => {
   if (!authHeader?.startsWith('Bearer ')) {
+    console.log('No valid auth header');
     return null;
   }
+  
   const token = authHeader.split(' ')[1];
+  
+  // For simplicity, we'll extract user info from the token payload
+  // In a real production app, you'd verify the JWT signature
   try {
     const payload = JSON.parse(atob(token.split('.')[1]));
-    return payload.sub;
-  } catch {
+    console.log('User authenticated:', payload.sub);
+    return payload.sub; // user ID
+  } catch (error) {
+    console.log('Failed to parse token:', error);
     return null;
   }
 };
 
-// Helper to map camelCase to snake_case for database
-const mapPersonData = (data: any) => {
-  return {
-    first_name: data.firstName,
-    last_name: data.lastName,
-    birth_date: data.birthDate || null,
-    birth_place: data.birthPlace || null,
-    death_date: data.deathDate || null,
-    gender: data.gender || 'other',
-    photo_url: data.photoUrl || null,
-    bio: data.biography || null,
-    occupation: data.occupation || null,
-  };
-};
-
-// Helper to map camelCase to snake_case for relationships
-const mapRelationshipData = (data: any) => {
-  return {
-    relationship_type: data.type || data.relationship_type,
-    person1_id: data.person1Id || data.person1_id,
-    person2_id: data.person2Id || data.person2_id,
-  };
-};
-
+// Health check endpoint
 app.get("/make-server-b3841c63/health", (c) => {
   return c.json({ status: "ok" });
 });
 
-// ============= AUTH =============
+// ============= AUTH ROUTES =============
 
+// Sign up a new user
 app.post("/make-server-b3841c63/auth/signup", async (c) => {
   try {
-    const { email, password, firstName, lastName } = await c.req.json();
+    const { email, password, first_name, last_name } = await c.req.json();
+
+    // Validate input
+    if (!email || !password || !first_name || !last_name) {
+      return c.json({ error: 'Todos los campos son requeridos' }, 400);
+    }
+
+    if (password.length < 6) {
+      return c.json({ error: 'La contraseña debe tener al menos 6 caracteres' }, 400);
+    }
+
     const supabase = getAdminClient();
+
+    // Create user with Supabase Auth
     const { data, error } = await supabase.auth.admin.createUser({
       email,
       password,
-      user_metadata: { firstName, lastName },
+      user_metadata: { first_name, last_name },
       email_confirm: true
     });
-    if (error) return c.json({ error: error.message }, 400);
-    return c.json({ user: data.user });
-  } catch (error) {
-    return c.json({ error: 'Failed to sign up user' }, 500);
-  }
-});
 
-app.post("/make-server-b3841c63/auth/signin", async (c) => {
-  try {
-    const { email, password } = await c.req.json();
-    const supabase = getAdminClient();
-    const { data, error } = await supabase.auth.admin.signInWithPassword({
-      email,
-      password,
+    if (error) {
+      console.error('Auth signup error:', error.message);
+
+      // Handle specific error cases
+      if (error.message.includes('already registered') || error.message.includes('User already registered')) {
+        return c.json({ error: 'Este email ya está registrado' }, 400);
+      }
+
+      return c.json({ error: error.message }, 400);
+    }
+
+    if (!data.user) {
+      return c.json({ error: 'No se pudo crear el usuario' }, 500);
+    }
+
+    console.log('User created successfully:', data.user.id);
+    return c.json({
+      user: {
+        id: data.user.id,
+        email: data.user.email,
+        first_name,
+        last_name
+      },
+      message: 'Usuario creado exitosamente'
     });
-    if (error) return c.json({ error: error.message }, 400);
-    return c.json({ user: data.user, session: data.session });
   } catch (error) {
-    return c.json({ error: 'Failed to sign in user' }, 500);
+    console.error('Signup error:', error);
+    return c.json({ error: 'Error al registrar usuario. Por favor intente nuevamente.' }, 500);
   }
 });
 
-// ============= FAMILIES =============
+// ============= FAMILY ROUTES =============
 
+// Create a new family tree
 app.post("/make-server-b3841c63/families", async (c) => {
   try {
     const userId = getUserIdFromAuth(c.req.header('Authorization'));
-    if (!userId) return c.json({ error: 'Unauthorized' }, 401);
+    if (!userId) {
+      return c.json({ error: 'Unauthorized - invalid or missing access token' }, 401);
+    }
 
     const { name } = await c.req.json();
-    const familyId = `family_${Date.now()}`;
-
     const supabase = getAdminClient();
-    
-    // Create family in relational table
-    const { data: family, error: familyError } = await supabase
+
+    // Create family in structured table
+    const { data: familyData, error: familyError } = await supabase
       .from('families')
       .insert({
-        id: familyId,
         name,
         owner_id: userId,
       })
       .select()
       .single();
 
-    if (familyError) throw familyError;
+    if (familyError) {
+      console.error('Failed to create family:', familyError.message);
+      return c.json({ error: 'Failed to create family tree' }, 500);
+    }
 
     // Add owner as family member
     const { error: memberError } = await supabase
       .from('family_members')
       .insert({
-        family_id: familyId,
+        family_id: familyData.id,
         user_id: userId,
         role: 'owner',
       });
 
-    if (memberError) throw memberError;
+    if (memberError) {
+      console.error('Failed to add family member:', memberError.message);
+      return c.json({ error: 'Failed to create family member' }, 500);
+    }
 
-    return c.json({ familyId, message: 'Family tree created successfully' });
+    // Also store in KV for backward compatibility
+    await kv.set(`family_${familyData.id}`, {
+      id: familyData.id,
+      name: familyData.name,
+      ownerId: userId,
+      createdAt: familyData.created_at,
+      memberIds: [userId],
+    });
+    await kv.set(`family_member_${userId}`, familyData.id);
+
+    return c.json({ familyId: familyData.id, message: 'Family tree created successfully' });
   } catch (error) {
+    console.log(`Create family error: ${error}`);
     return c.json({ error: 'Failed to create family tree' }, 500);
   }
 });
 
+// Get user's family
 app.get("/make-server-b3841c63/families/my-family", async (c) => {
   try {
     const userId = getUserIdFromAuth(c.req.header('Authorization'));
-    if (!userId) return c.json({ error: 'Unauthorized' }, 401);
+    if (!userId) {
+      return c.json({ error: 'Unauthorized - invalid or missing access token' }, 401);
+    }
 
     const supabase = getAdminClient();
-    
-    // Get family from family_members table
+
+    // Get family ID from family_members table
     const { data: memberData, error: memberError } = await supabase
       .from('family_members')
       .select('family_id')
       .eq('user_id', userId)
-      .single();
+      .maybeSingle();
 
-    if (memberError || !memberData) {
+    if (memberError) {
+      console.error('Failed to get family member:', memberError.message);
+      return c.json({ error: 'Failed to get family' }, 500);
+    }
+
+    if (!memberData) {
       return c.json({ family: null });
     }
 
     // Get family details
-    const { data: family, error: familyError } = await supabase
+    const { data: familyData, error: familyError } = await supabase
       .from('families')
       .select('*')
       .eq('id', memberData.family_id)
       .single();
 
-    if (familyError) throw familyError;
-    
-    return c.json({ family });
+    if (familyError) {
+      console.error('Failed to get family:', familyError.message);
+      return c.json({ error: 'Failed to get family' }, 500);
+    }
+
+    return c.json({ family: { id: familyData.id, name: familyData.name, ownerId: familyData.owner_id, createdAt: familyData.created_at } });
   } catch (error) {
+    console.log(`Get family error: ${error}`);
     return c.json({ error: 'Failed to get family' }, 500);
   }
 });
 
-// ============= PERSONS =============
+// ============= PERSON ROUTES =============
 
+// Get all persons in a family
 app.get("/make-server-b3841c63/families/:familyId/persons", async (c) => {
   try {
     const userId = getUserIdFromAuth(c.req.header('Authorization'));
-    if (!userId) return c.json({ error: 'Unauthorized' }, 401);
+    if (!userId) {
+      return c.json({ error: 'Unauthorized - invalid or missing access token' }, 401);
+    }
 
     const familyId = c.req.param('familyId');
     const supabase = getAdminClient();
-    const { data: persons, error } = await supabase
+
+    // Get all persons from structured table
+    const { data: personsData, error: personsError } = await supabase
       .from('persons')
       .select('*')
       .eq('family_id', familyId);
 
-    if (error) throw error;
-    return c.json({ persons: persons || [] });
+    if (personsError) {
+      console.error('Failed to get persons:', personsError.message);
+      return c.json({ error: 'Failed to get persons' }, 500);
+    }
+
+    // Transform to match expected format
+    const persons = (personsData || []).map(p => ({
+      id: p.id,
+      first_name: p.first_name,
+      last_name: p.last_name,
+      birthDate: p.birth_date,
+      birthPlace: p.birth_place,
+      deathDate: p.death_date,
+      gender: p.gender,
+      occupation: p.occupation,
+      photo_url: p.photo_url,
+      biography: p.bio,
+    }));
+
+    return c.json({ persons });
   } catch (error) {
+    console.log(`Get persons error: ${error}`);
     return c.json({ error: 'Failed to get persons' }, 500);
   }
 });
 
+// Add a person
 app.post("/make-server-b3841c63/families/:familyId/persons", async (c) => {
   try {
     const userId = getUserIdFromAuth(c.req.header('Authorization'));
-    if (!userId) return c.json({ error: 'Unauthorized' }, 401);
+    if (!userId) {
+      return c.json({ error: 'Unauthorized - invalid or missing access token' }, 401);
+    }
 
     const familyId = c.req.param('familyId');
     const personData = await c.req.json();
-
-    // Map camelCase to snake_case for database
-    const mappedData = mapPersonData(personData);
-
     const supabase = getAdminClient();
-    const { data: person, error } = await supabase
+
+    // Insert person into structured table
+    const { data: createdPerson, error: personError } = await supabase
       .from('persons')
       .insert({
-        ...mappedData,
         family_id: familyId,
+        first_name: personData.first_name,
+        last_name: personData.last_name,
+        birth_date: personData.birthDate || null,
+        birth_place: personData.birthPlace || null,
+        death_date: personData.deathDate || null,
+        gender: personData.gender || null,
+        occupation: personData.occupation || null,
+        photo_url: personData.photo_url || null,
+        bio: personData.biography || null,
         created_by: userId,
       })
       .select()
       .single();
 
-    if (error) {
-      console.error('Insert person error:', error);
-      throw error;
+    if (personError) {
+      console.error('Failed to create person:', personError.message);
+      return c.json({ error: 'Failed to add person' }, 500);
     }
 
-    console.log('Person created successfully:', { personId: person.id, familyId, userId });
+    // Create activity
+    const { error: activityError } = await supabase
+      .from('activities')
+      .insert({
+        family_id: familyId,
+        user_id: userId,
+        activity_type: 'added_person',
+        target_person_id: createdPerson.id,
+        metadata: {
+          personName: `${createdPerson.first_name} ${createdPerson.last_name}`,
+        },
+      });
 
-    // Log activity
-    const activityId = `activity_${familyId}_${Date.now()}`;
-    await kv.set(activityId, {
-      id: activityId,
-      type: 'added_person',
-      userId,
-      userName: personData.firstName || userId,
-      targetPersonName: `${personData.firstName} ${personData.lastName}`,
-      timestamp: new Date().toISOString(),
-    });
+    if (activityError) {
+      console.error('Failed to create activity:', activityError.message);
+    }
+
+    // Transform to match expected format
+    const person = {
+      id: createdPerson.id,
+      first_name: createdPerson.first_name,
+      last_name: createdPerson.last_name,
+      birthDate: createdPerson.birth_date,
+      birthPlace: createdPerson.birth_place,
+      deathDate: createdPerson.death_date,
+      gender: createdPerson.gender,
+      occupation: createdPerson.occupation,
+      photo_url: createdPerson.photo_url,
+      biography: createdPerson.bio,
+    };
 
     return c.json({ person });
-  } catch (error: any) {
-    console.error('Failed to add person:', error.message);
-    return c.json({ error: error.message || 'Failed to add person' }, 500);
+  } catch (error) {
+    console.log(`Add person error: ${error}`);
+    return c.json({ error: 'Failed to add person' }, 500);
   }
 });
 
+// Update a person
 app.put("/make-server-b3841c63/families/:familyId/persons/:personId", async (c) => {
   try {
     const userId = getUserIdFromAuth(c.req.header('Authorization'));
-    if (!userId) return c.json({ error: 'Unauthorized' }, 401);
+    if (!userId) {
+      return c.json({ error: 'Unauthorized - invalid or missing access token' }, 401);
+    }
 
     const personId = c.req.param('personId');
     const updates = await c.req.json();
-
-    // Map camelCase to snake_case for database
-    const mappedUpdates = mapPersonData(updates);
-
     const supabase = getAdminClient();
-    const { data: updatedPerson, error } = await supabase
+
+    // Update person in structured table
+    const { data: updatedPerson, error: updateError } = await supabase
       .from('persons')
-      .update(mappedUpdates)
+      .update({
+        first_name: updates.first_name,
+        last_name: updates.last_name,
+        birth_date: updates.birthDate || null,
+        birth_place: updates.birthPlace || null,
+        death_date: updates.deathDate || null,
+        gender: updates.gender || null,
+        occupation: updates.occupation || null,
+        photo_url: updates.photo_url || null,
+        bio: updates.biography || null,
+      })
       .eq('id', personId)
       .select()
       .single();
 
-    if (error) {
-      console.error('Update person error:', error);
-      throw error;
+    if (updateError) {
+      console.error('Failed to update person:', updateError.message);
+      return c.json({ error: 'Failed to update person' }, 500);
     }
 
-    console.log('Person updated successfully:', { personId, userId });
-    return c.json({ person: updatedPerson });
-  } catch (error: any) {
-    console.error('Failed to update person:', error.message);
-    return c.json({ error: error.message || 'Failed to update person' }, 500);
+    // Transform to match expected format
+    const person = {
+      id: updatedPerson.id,
+      first_name: updatedPerson.first_name,
+      last_name: updatedPerson.last_name,
+      birthDate: updatedPerson.birth_date,
+      birthPlace: updatedPerson.birth_place,
+      deathDate: updatedPerson.death_date,
+      gender: updatedPerson.gender,
+      occupation: updatedPerson.occupation,
+      photo_url: updatedPerson.photo_url,
+      biography: updatedPerson.bio,
+    };
+
+    return c.json({ person });
+  } catch (error) {
+    console.log(`Update person error: ${error}`);
+    return c.json({ error: 'Failed to update person' }, 500);
   }
 });
 
+// Delete a person
 app.delete("/make-server-b3841c63/families/:familyId/persons/:personId", async (c) => {
   try {
     const userId = getUserIdFromAuth(c.req.header('Authorization'));
-    if (!userId) return c.json({ error: 'Unauthorized' }, 401);
+    if (!userId) {
+      return c.json({ error: 'Unauthorized - invalid or missing access token' }, 401);
+    }
 
-    const familyId = c.req.param('familyId');
     const personId = c.req.param('personId');
-
     const supabase = getAdminClient();
-    
-    // Delete relationships first
-    const { error: relError } = await supabase
+
+    // Delete relationships first (cascade should handle this, but being explicit)
+    await supabase
       .from('relationships')
       .delete()
       .or(`person1_id.eq.${personId},person2_id.eq.${personId}`);
 
-    if (relError) throw relError;
-
-    // Delete person
-    const { error: personError } = await supabase
+    // Delete person from structured table
+    const { error: deleteError } = await supabase
       .from('persons')
       .delete()
       .eq('id', personId);
 
-    if (personError) throw personError;
+    if (deleteError) {
+      console.error('Failed to delete person:', deleteError.message);
+      return c.json({ error: 'Failed to delete person' }, 500);
+    }
 
     return c.json({ message: 'Person deleted successfully' });
   } catch (error) {
+    console.log(`Delete person error: ${error}`);
     return c.json({ error: 'Failed to delete person' }, 500);
   }
 });
 
-// ============= RELATIONSHIPS =============
+// ============= RELATIONSHIP ROUTES =============
 
+// Get all relationships in a family
 app.get("/make-server-b3841c63/families/:familyId/relationships", async (c) => {
   try {
     const userId = getUserIdFromAuth(c.req.header('Authorization'));
-    if (!userId) return c.json({ error: 'Unauthorized' }, 401);
+    if (!userId) {
+      return c.json({ error: 'Unauthorized - invalid or missing access token' }, 401);
+    }
 
     const familyId = c.req.param('familyId');
     const supabase = getAdminClient();
-    
-    const { data: relationships, error } = await supabase
+
+    // Get all relationships from structured table
+    const { data: relationshipsData, error: relationshipsError } = await supabase
       .from('relationships')
       .select('*')
       .eq('family_id', familyId);
 
-    if (error) throw error;
-    return c.json({ relationships: relationships || [] });
+    if (relationshipsError) {
+      console.error('Failed to get relationships:', relationshipsError.message);
+      return c.json({ error: 'Failed to get relationships' }, 500);
+    }
+
+    // Transform to match expected format
+    const relationships = (relationshipsData || []).map(r => ({
+      id: r.id,
+      type: r.relationship_type,
+      person1Id: r.person1_id,
+      person2Id: r.person2_id,
+    }));
+
+    return c.json({ relationships });
   } catch (error) {
+    console.log(`Get relationships error: ${error}`);
     return c.json({ error: 'Failed to get relationships' }, 500);
   }
 });
 
+// Add a relationship
 app.post("/make-server-b3841c63/families/:familyId/relationships", async (c) => {
   try {
     const userId = getUserIdFromAuth(c.req.header('Authorization'));
-    if (!userId) return c.json({ error: 'Unauthorized' }, 401);
+    if (!userId) {
+      return c.json({ error: 'Unauthorized - invalid or missing access token' }, 401);
+    }
 
     const familyId = c.req.param('familyId');
     const relationshipData = await c.req.json();
-
-    // Map camelCase to snake_case
-    const mappedData = {
-      relationship_type: relationshipData.type || relationshipData.relationship_type,
-      person1_id: relationshipData.person1Id || relationshipData.person1_id,
-      person2_id: relationshipData.person2Id || relationshipData.person2_id,
-      family_id: familyId,
-    };
-
     const supabase = getAdminClient();
-    const { data: relationship, error } = await supabase
+
+    // Insert relationship into structured table
+    const { data: createdRelationship, error: relationshipError } = await supabase
       .from('relationships')
-      .insert(mappedData)
+      .insert({
+        family_id: familyId,
+        person1_id: relationshipData.person1Id,
+        person2_id: relationshipData.person2Id,
+        relationship_type: relationshipData.type,
+      })
       .select()
       .single();
 
-    if (error) {
-      console.error('Insert relationship error:', error);
-      throw error;
+    if (relationshipError) {
+      console.error('Failed to create relationship:', relationshipError.message);
+      return c.json({ error: 'Failed to add relationship' }, 500);
     }
 
-    console.log('Relationship created successfully:', { relationshipId: relationship.id, familyId, userId });
+    // Transform to match expected format
+    const relationship = {
+      id: createdRelationship.id,
+      type: createdRelationship.relationship_type,
+      person1Id: createdRelationship.person1_id,
+      person2Id: createdRelationship.person2_id,
+    };
+
     return c.json({ relationship });
-  } catch (error: any) {
-    console.error('Failed to add relationship:', error.message);
-    return c.json({ error: error.message || 'Failed to add relationship' }, 500);
+  } catch (error) {
+    console.log(`Add relationship error: ${error}`);
+    return c.json({ error: 'Failed to add relationship' }, 500);
   }
 });
 
-// ============= ACTIVITIES =============
+// ============= ACTIVITY ROUTES =============
 
+// Get recent activities
 app.get("/make-server-b3841c63/families/:familyId/activities", async (c) => {
   try {
     const userId = getUserIdFromAuth(c.req.header('Authorization'));
-    if (!userId) return c.json({ error: 'Unauthorized' }, 401);
+    if (!userId) {
+      return c.json({ error: 'Unauthorized - invalid or missing access token' }, 401);
+    }
 
     const familyId = c.req.param('familyId');
-    const activities = await kv.getByPrefix(`activity_${familyId}_`);
+    const supabase = getAdminClient();
 
-    const sorted = (activities || []).sort(
-      (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
-    );
+    // Get activities from structured table with user info
+    const { data: activitiesData, error: activitiesError } = await supabase
+      .from('activities')
+      .select(`
+        *,
+        user:user_id (id, email, raw_user_meta_data),
+        person:target_person_id (id, first_name, last_name)
+      `)
+      .eq('family_id', familyId)
+      .order('created_at', { ascending: false })
+      .limit(10);
 
-    return c.json({ activities: sorted.slice(0, 10) });
+    if (activitiesError) {
+      console.error('Failed to get activities:', activitiesError.message);
+      return c.json({ error: 'Failed to get activities' }, 500);
+    }
+
+    // Transform to match expected format
+    const activities = (activitiesData || []).map(a => ({
+      id: a.id,
+      type: a.activity_type,
+      userId: a.user_id,
+      userName: a.user?.raw_user_meta_data?.first_name || a.user?.email || 'Usuario',
+      targetPersonName: a.person ? `${a.person.first_name} ${a.person.last_name}` : a.metadata?.personName || 'Desconocido',
+      timestamp: a.created_at,
+    }));
+
+    return c.json({ activities });
   } catch (error) {
+    console.log(`Get activities error: ${error}`);
     return c.json({ error: 'Failed to get activities' }, 500);
   }
 });
 
-// ============= INVITATIONS =============
+// ============= INVITATION ROUTES =============
 
+// Create invitation
 app.post("/make-server-b3841c63/families/:familyId/invitations", async (c) => {
   try {
     const userId = getUserIdFromAuth(c.req.header('Authorization'));
-    if (!userId) return c.json({ error: 'Unauthorized' }, 401);
+    if (!userId) {
+      return c.json({ error: 'Unauthorized - invalid or missing access token' }, 401);
+    }
 
     const familyId = c.req.param('familyId');
     const { email } = await c.req.json();
+    const supabase = getAdminClient();
 
-    const invitationId = `invitation_${Date.now()}`;
-    const invitation = {
-      id: invitationId,
-      familyId,
-      email,
-      invitedBy: userId,
-      status: 'pending',
-      createdAt: new Date().toISOString(),
-    };
+    // Generate unique token
+    const token = `inv_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
-    await kv.set(invitationId, invitation);
+    // Insert invitation into structured table
+    const { data: createdInvitation, error: invitationError } = await supabase
+      .from('invitations')
+      .insert({
+        family_id: familyId,
+        email,
+        invited_by: userId,
+        token,
+        status: 'pending',
+      })
+      .select()
+      .single();
 
-    const origin = c.req.header('origin') || 'https://your-app.com';
-    const invitationLink = `${origin}/invitation/${invitationId}`;
+    if (invitationError) {
+      console.error('Failed to create invitation:', invitationError.message);
+      return c.json({ error: 'Failed to create invitation' }, 500);
+    }
 
-    return c.json({ invitation, invitationLink });
+    // Generate invitation link
+    const invitationLink = `${c.req.header('origin')}/invitation/${createdInvitation.id}`;
+
+    return c.json({ invitation: createdInvitation, invitationLink });
   } catch (error) {
+    console.log(`Create invitation error: ${error}`);
     return c.json({ error: 'Failed to create invitation' }, 500);
   }
 });
 
+// Get invitation by ID (public)
 app.get("/make-server-b3841c63/invitations/:invitationId", async (c) => {
   try {
     const invitationId = c.req.param('invitationId');
-    const invitation = await kv.get(invitationId);
-    if (!invitation) return c.json({ error: 'Invitation not found' }, 404);
+    const supabase = getAdminClient();
 
-    const family = await kv.get(invitation.familyId);
-    return c.json({ invitation, familyName: family?.name });
+    // Get invitation from structured table
+    const { data: invitation, error: invitationError } = await supabase
+      .from('invitations')
+      .select('*, family:family_id (name)')
+      .eq('id', invitationId)
+      .single();
+
+    if (invitationError || !invitation) {
+      return c.json({ error: 'Invitation not found' }, 404);
+    }
+
+    return c.json({ invitation, familyName: invitation.family?.name });
   } catch (error) {
+    console.log(`Get invitation error: ${error}`);
     return c.json({ error: 'Failed to get invitation' }, 500);
   }
 });
 
+// Accept invitation
 app.post("/make-server-b3841c63/invitations/:invitationId/accept", async (c) => {
   try {
     const userId = getUserIdFromAuth(c.req.header('Authorization'));
-    if (!userId) return c.json({ error: 'Unauthorized' }, 401);
-
-    const invitationId = c.req.param('invitationId');
-    const invitation = await kv.get(invitationId);
-    if (!invitation) return c.json({ error: 'Invitation not found' }, 404);
-
-    const family = await kv.get(invitation.familyId);
-    if (family) {
-      family.memberIds = [...(family.memberIds || []), userId];
-      await kv.set(invitation.familyId, family);
+    if (!userId) {
+      return c.json({ error: 'Unauthorized - invalid or missing access token' }, 401);
     }
 
-    await kv.set(`family_member_${userId}`, invitation.familyId);
-    invitation.status = 'accepted';
-    await kv.set(invitationId, invitation);
+    const invitationId = c.req.param('invitationId');
+    const supabase = getAdminClient();
 
-    return c.json({ message: 'Invitation accepted', familyId: invitation.familyId });
+    // Get invitation from structured table
+    const { data: invitation, error: invitationError } = await supabase
+      .from('invitations')
+      .select('*')
+      .eq('id', invitationId)
+      .single();
+
+    if (invitationError || !invitation) {
+      return c.json({ error: 'Invitation not found' }, 404);
+    }
+
+    // Add user to family_members
+    const { error: memberError } = await supabase
+      .from('family_members')
+      .insert({
+        family_id: invitation.family_id,
+        user_id: userId,
+        role: 'member',
+      });
+
+    if (memberError) {
+      console.error('Failed to add family member:', memberError.message);
+      // Check if user is already a member
+      if (memberError.code === '23505') {
+        return c.json({ message: 'You are already a member of this family', familyId: invitation.family_id });
+      }
+      return c.json({ error: 'Failed to join family' }, 500);
+    }
+
+    // Update invitation status
+    await supabase
+      .from('invitations')
+      .update({ status: 'accepted', accepted_at: new Date().toISOString() })
+      .eq('id', invitationId);
+
+    return c.json({ message: 'Invitation accepted', familyId: invitation.family_id });
   } catch (error) {
+    console.log(`Accept invitation error: ${error}`);
     return c.json({ error: 'Failed to accept invitation' }, 500);
   }
 });
 
-// ============= PHOTO UPLOAD =============
+// ============= PHOTO UPLOAD ROUTES =============
 
+// Upload photo
 app.post("/make-server-b3841c63/upload-photo", async (c) => {
   try {
     const userId = getUserIdFromAuth(c.req.header('Authorization'));
-    if (!userId) return c.json({ error: 'Unauthorized' }, 401);
+    if (!userId) {
+      return c.json({ error: 'Unauthorized - invalid or missing access token' }, 401);
+    }
 
     const formData = await c.req.formData();
     const file = formData.get('file') as File;
-    if (!file) return c.json({ error: 'No file provided' }, 400);
+    
+    if (!file) {
+      return c.json({ error: 'No file provided' }, 400);
+    }
 
     const supabase = getAdminClient();
     const bucketName = 'make-b3841c63-family-photos';
     const fileName = `${userId}/${Date.now()}_${file.name}`;
+    
+    const { data, error } = await supabase.storage
+      .from(bucketName)
+      .upload(fileName, file);
 
-    const { error } = await supabase.storage.from(bucketName).upload(fileName, file);
-    if (error) return c.json({ error: error.message }, 500);
+    if (error) {
+      console.log(`Upload error: ${error.message}`);
+      return c.json({ error: error.message }, 500);
+    }
 
+    // Generate signed URL (valid for 1 year)
     const { data: signedUrlData } = await supabase.storage
       .from(bucketName)
       .createSignedUrl(fileName, 31536000);
 
-    return c.json({ photoUrl: signedUrlData?.signedUrl });
+    return c.json({ photo_url: signedUrlData?.signedUrl });
   } catch (error) {
+    console.log(`Photo upload error: ${error}`);
     return c.json({ error: 'Failed to upload photo' }, 500);
   }
 });
 
+// Export the app
 export default app;

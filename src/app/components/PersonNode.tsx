@@ -12,8 +12,8 @@ interface PersonNodeProps {
 export function PersonNode({ person, onClick, isSelected }: PersonNodeProps) {
   const birthYear = person.birthDate ? new Date(person.birthDate).getFullYear() : '?';
   const deathYear = person.deathDate ? new Date(person.deathDate).getFullYear() : null;
-  const initials = person.firstName && person.lastName 
-    ? `${person.firstName[0]}${person.lastName[0]}`.toUpperCase()
+  const initials = person.first_name && person.last_name 
+    ? `${person.first_name[0]}${person.last_name[0]}`.toUpperCase()
     : 'NA';
 
   return (
@@ -26,7 +26,7 @@ export function PersonNode({ person, onClick, isSelected }: PersonNodeProps) {
       `}
     >
       <Avatar className="w-16 h-16 ring-2 ring-gray-100">
-        <AvatarImage src={person.photoUrl} alt={`${person.firstName} ${person.lastName}`} />
+        <AvatarImage src={person.photo_url} alt={`${person.first_name} ${person.last_name}`} />
         <AvatarFallback className="bg-[#3D6F42] text-white text-lg">
           {initials}
         </AvatarFallback>
@@ -34,10 +34,10 @@ export function PersonNode({ person, onClick, isSelected }: PersonNodeProps) {
       
       <div className="text-center w-full">
         <h4 className="font-medium text-sm text-gray-900 truncate">
-          {person.firstName}
+          {person.first_name}
         </h4>
         <p className="text-xs text-gray-600 truncate">
-          {person.lastName}
+          {person.last_name}
         </p>
         <p className="text-xs text-gray-500 mt-1">
           {birthYear}{deathYear ? ` - ${deathYear}` : ''}

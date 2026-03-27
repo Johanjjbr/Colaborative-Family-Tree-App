@@ -29,18 +29,18 @@ interface ProfilePanelProps {
 }
 
 function RelativeLine({ person, onClick }: { person: Person; onClick?: () => void }) {
-  const initials = `${person.firstName[0]}${person.lastName[0]}`.toUpperCase();
+  const initials = `${person.first_name[0]}${person.last_name[0]}`.toUpperCase();
   return (
     <button
       className="flex items-center gap-2 p-2 rounded-lg bg-gray-50 hover:bg-gray-100 transition-colors w-full text-left"
       onClick={onClick}
     >
       <Avatar className="w-8 h-8 shrink-0">
-        <AvatarImage src={person.photoUrl} />
+        <AvatarImage src={person.photo_url} />
         <AvatarFallback className="text-xs bg-[#3D6F42] text-white">{initials}</AvatarFallback>
       </Avatar>
       <div className="min-w-0">
-        <p className="text-sm font-medium text-gray-900 truncate">{person.firstName} {person.lastName}</p>
+        <p className="text-sm font-medium text-gray-900 truncate">{person.first_name} {person.last_name}</p>
         {person.birthDate && (
           <p className="text-xs text-gray-400">{new Date(person.birthDate).getFullYear()}</p>
         )}
@@ -64,7 +64,7 @@ export function ProfilePanel({ person, onClose }: ProfilePanelProps) {
 
   const birthYear = person.birthDate ? new Date(person.birthDate).getFullYear() : null;
   const deathYear = person.deathDate ? new Date(person.deathDate).getFullYear() : null;
-  const initials  = `${person.firstName?.[0] ?? ''}${person.lastName?.[0] ?? ''}`.toUpperCase() || '?';
+  const initials  = `${person.first_name?.[0] ?? ''}${person.last_name?.[0] ?? ''}`.toUpperCase() || '?';
 
   const handleAddRelation = (type: 'parent' | 'spouse' | 'child') => {
     setAddDialogType(type);
@@ -75,7 +75,7 @@ export function ProfilePanel({ person, onClose }: ProfilePanelProps) {
     setDeleting(true);
     try {
       await deletePerson(person.id);
-      toast.success(`${person.firstName} eliminado del árbol`);
+      toast.success(`${person.first_name} eliminado del árbol`);
       onClose();
     } catch {
       toast.error('Error al eliminar. Inténtalo de nuevo.');
@@ -126,11 +126,11 @@ export function ProfilePanel({ person, onClose }: ProfilePanelProps) {
 
           <div className="flex items-center gap-4">
             <Avatar className="w-18 h-18 ring-4 ring-white/30" style={{ width: 72, height: 72 }}>
-              <AvatarImage src={person.photoUrl} alt={`${person.firstName} ${person.lastName}`} />
+              <AvatarImage src={person.photo_url} alt={`${person.first_name} ${person.last_name}`} />
               <AvatarFallback className="bg-white text-[#3D6F42] text-xl">{initials}</AvatarFallback>
             </Avatar>
             <div>
-              <h3 className="text-xl font-semibold leading-tight">{person.firstName} {person.lastName}</h3>
+              <h3 className="text-xl font-semibold leading-tight">{person.first_name} {person.last_name}</h3>
               <p className="text-white/70 text-sm mt-0.5">
                 {birthYear ?? '?'}{deathYear ? ` — ${deathYear}` : ''}
                 {!deathYear && birthYear && ' — Presente'}
@@ -291,10 +291,10 @@ export function ProfilePanel({ person, onClose }: ProfilePanelProps) {
       <AlertDialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>¿Eliminar a {person.firstName}?</AlertDialogTitle>
+            <AlertDialogTitle>¿Eliminar a {person.first_name}?</AlertDialogTitle>
             <AlertDialogDescription>
               Esta acción no se puede deshacer. Se eliminarán también todas las relaciones
-              asociadas a <strong>{person.firstName} {person.lastName}</strong>.
+              asociadas a <strong>{person.first_name} {person.last_name}</strong>.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

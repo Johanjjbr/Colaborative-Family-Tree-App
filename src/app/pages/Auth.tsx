@@ -23,8 +23,8 @@ export default function Auth() {
   // Sign Up form state
   const [signUpEmail, setSignUpEmail] = useState('');
   const [signUpPassword, setSignUpPassword] = useState('');
-  const [signUpFirstName, setSignUpFirstName] = useState('');
-  const [signUpLastName, setSignUpLastName] = useState('');
+  const [signUpfirst_name, setSignUpfirst_name] = useState('');
+  const [signUplast_name, setSignUplast_name] = useState('');
 
   // Check server connection on mount
   useEffect(() => {
@@ -77,7 +77,7 @@ export default function Auth() {
     e.preventDefault();
 
     // Basic validation
-    if (!signUpFirstName.trim() || !signUpLastName.trim()) {
+    if (!signUpfirst_name.trim() || !signUplast_name.trim()) {
       toast.error('Por favor ingresa tu nombre y apellido');
       return;
     }
@@ -101,7 +101,7 @@ export default function Auth() {
 
     try {
       console.log('Starting signup process...');
-      await signUp(signUpEmail, signUpPassword, signUpFirstName, signUpLastName);
+      await signUp(signUpEmail, signUpPassword, signUpfirst_name, signUplast_name);
       toast.success('¡Cuenta creada exitosamente!');
       navigate('/setup');
     } catch (error: any) {
@@ -226,25 +226,25 @@ export default function Auth() {
                 <CardContent className="space-y-4">
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-2">
-                      <Label htmlFor="signup-firstname">Nombre</Label>
+                      <Label htmlFor="signup-first_name">Nombre</Label>
                       <Input
-                        id="signup-firstname"
+                        id="signup-first_name"
                         type="text"
                         placeholder="Juan"
-                        value={signUpFirstName}
-                        onChange={(e) => setSignUpFirstName(e.target.value)}
+                        value={signUpfirst_name}
+                        onChange={(e) => setSignUpfirst_name(e.target.value)}
                         required
                         disabled={loading}
                       />
                     </div>
                     <div className="space-y-2">
-                      <Label htmlFor="signup-lastname">Apellido</Label>
+                      <Label htmlFor="signup-last_name">Apellido</Label>
                       <Input
-                        id="signup-lastname"
+                        id="signup-last_name"
                         type="text"
                         placeholder="Pérez"
-                        value={signUpLastName}
-                        onChange={(e) => setSignUpLastName(e.target.value)}
+                        value={signUplast_name}
+                        onChange={(e) => setSignUplast_name(e.target.value)}
                         required
                         disabled={loading}
                       />

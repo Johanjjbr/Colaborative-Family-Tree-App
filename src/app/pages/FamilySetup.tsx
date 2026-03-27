@@ -72,7 +72,7 @@ export default function FamilySetup() {
             <Users className="w-8 h-8 text-white" />
           </div>
           <h1 className="text-3xl font-bold text-[#3D6F42] mb-2">
-            ¡Bienvenido, {user?.firstName}!
+            ¡Bienvenido, {user?.first_name}!
           </h1>
           <p className="text-gray-600">
             Comienza creando tu árbol genealógico familiar

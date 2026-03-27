@@ -5,15 +5,15 @@ import { projectId, publicAnonKey } from '/utils/supabase/info';
 interface User {
   id: string;
   email: string;
-  firstName?: string;
-  lastName?: string;
+  first_name?: string;
+  last_name?: string;
 }
 
 interface AuthContextType {
   user: User | null;
   accessToken: string | null;
   loading: boolean;
-  signUp: (email: string, password: string, firstName: string, lastName: string) => Promise<void>;
+  signUp: (email: string, password: string, first_name: string, last_name: string) => Promise<void>;
   signIn: (email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
   checkSession: () => Promise<void>;
@@ -41,8 +41,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setUser({
           id: session.user.id,
           email: session.user.email!,
-          firstName: session.user.user_metadata?.firstName,
-          lastName: session.user.user_metadata?.lastName,
+          first_name: session.user.user_metadata?.first_name,
+          last_name: session.user.user_metadata?.last_name,
         });
         setAccessToken(session.access_token);
       } else {
@@ -67,8 +67,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setUser({
           id: session.user.id,
           email: session.user.email!,
-          firstName: session.user.user_metadata?.firstName,
-          lastName: session.user.user_metadata?.lastName,
+          first_name: session.user.user_metadata?.first_name,
+          last_name: session.user.user_metadata?.last_name,
         });
         setAccessToken(session.access_token);
       } else {
@@ -80,9 +80,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => subscription.unsubscribe();
   }, []);
 
-  const signUp = async (email: string, password: string, firstName: string, lastName: string) => {
+  const signUp = async (email: string, password: string, first_name: string, last_name: string) => {
     try {
-      console.log('Attempting signup with:', { email, firstName, lastName });
+      console.log('Attempting signup with:', { email, first_name, last_name });
       console.log('API URL:', `${API_URL}/auth/signup`);
 
       let response;
@@ -95,7 +95,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           headers: {
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({ email, password, firstName, lastName }),
+          body: JSON.stringify({ email, password, first_name, last_name }),
         });
       } catch (fetchError: any) {
         console.error('Fetch error:', fetchError);
@@ -133,8 +133,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           password,
           options: {
             data: {
-              firstName,
-              lastName,
+              first_name,
+              last_name,
             },
             emailRedirectTo: window.location.origin,
           },
@@ -167,8 +167,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setUser({
             id: data.session.user.id,
             email: data.session.user.email!,
-            firstName: data.session.user.user_metadata?.firstName,
-            lastName: data.session.user.user_metadata?.lastName,
+            first_name: data.session.user.user_metadata?.first_name,
+            last_name: data.session.user.user_metadata?.last_name,
           });
           setAccessToken(data.session.access_token);
         } else {
@@ -195,8 +195,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 setUser({
                   id: signInData.session.user.id,
                   email: signInData.session.user.email!,
-                  firstName: signInData.session.user.user_metadata?.firstName,
-                  lastName: signInData.session.user.user_metadata?.lastName,
+                  first_name: signInData.session.user.user_metadata?.first_name,
+                  last_name: signInData.session.user.user_metadata?.last_name,
                 });
                 setAccessToken(signInData.session.access_token);
               } else {
@@ -235,8 +235,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             setUser({
               id: signInData.session.user.id,
               email: signInData.session.user.email!,
-              firstName: signInData.session.user.user_metadata?.firstName,
-              lastName: signInData.session.user.user_metadata?.lastName,
+              first_name: signInData.session.user.user_metadata?.first_name,
+              last_name: signInData.session.user.user_metadata?.last_name,
             });
             setAccessToken(signInData.session.access_token);
           }
@@ -270,8 +270,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             setUser({
               id: data.session.user.id,
               email: data.session.user.email!,
-              firstName: data.session.user.user_metadata?.firstName,
-              lastName: data.session.user.user_metadata?.lastName,
+              first_name: data.session.user.user_metadata?.first_name,
+              last_name: data.session.user.user_metadata?.last_name,
             });
             setAccessToken(data.session.access_token);
             return;
@@ -302,8 +302,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setUser({
           id: data.session.user.id,
           email: data.session.user.email!,
-          firstName: data.session.user.user_metadata?.firstName,
-          lastName: data.session.user.user_metadata?.lastName,
+          first_name: data.session.user.user_metadata?.first_name,
+          last_name: data.session.user.user_metadata?.last_name,
         });
         setAccessToken(data.session.access_token);
       }

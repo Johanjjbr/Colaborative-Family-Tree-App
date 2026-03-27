@@ -1,13 +1,13 @@
 export interface Person {
   id: string;
-  firstName: string;
-  lastName: string;
+  first_name: string;
+  last_name: string;
   birthDate?: string;
   birthPlace?: string;
   deathDate?: string;
   occupation?: string;
   biography?: string;
-  photoUrl?: string;
+  photo_url?: string;
   gender: 'male' | 'female' | 'other';
 }
 

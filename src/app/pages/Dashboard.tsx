@@ -67,8 +67,8 @@ export function Dashboard() {
   const currentUser = getPersonById(currentUserId);
   const generations = countGenerations(persons, relationships);
 
-  const initials = user?.firstName && user?.lastName
-    ? `${user.firstName[0]}${user.lastName[0]}`.toUpperCase()
+  const initials = user?.first_name && user?.last_name
+    ? `${user.first_name[0]}${user.last_name[0]}`.toUpperCase()
     : (user?.email ? user.email.slice(0, 2).toUpperCase() : 'NA');
 
   const handleLogout = async () => {
@@ -149,12 +149,12 @@ export function Dashboard() {
           <CardContent className="p-8 relative z-10">
             <div className="flex flex-col md:flex-row items-start md:items-center gap-6">
               <Avatar className="w-20 h-20 ring-4 ring-white/30">
-                <AvatarImage src={currentUser?.photoUrl} />
+                <AvatarImage src={currentUser?.photo_url} />
                 <AvatarFallback className="bg-white text-[#3D6F42] text-2xl">{initials}</AvatarFallback>
               </Avatar>
               <div className="flex-1">
                 <h2 className="text-2xl font-semibold mb-1">
-                  Bienvenido/a, {user?.firstName ?? user?.email}
+                  Bienvenido/a, {user?.first_name ?? user?.email}
                 </h2>
                 <p className="text-white/80 mb-4 text-sm">
                   Tu árbol tiene{' '}

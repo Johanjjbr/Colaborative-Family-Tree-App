@@ -179,7 +179,7 @@ export function TreeCanvas() {
   // ── Search ────────────────────────────────────────────────────────────────
   const searchResults = searchQuery.trim()
     ? persons.filter(p =>
-        `${p.firstName} ${p.lastName}`.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        `${p.first_name} ${p.last_name}`.toLowerCase().includes(searchQuery.toLowerCase()) ||
         (p.occupation ?? '').toLowerCase().includes(searchQuery.toLowerCase()) ||
         (p.birthPlace ?? '').toLowerCase().includes(searchQuery.toLowerCase())
       )
@@ -249,8 +249,8 @@ export function TreeCanvas() {
         svgContent += `
   <rect x="${nx}" y="${ny}" width="${NODE_W}" height="${NODE_H}" rx="12" fill="white" stroke="#e2e8f0" stroke-width="1.5"/>
   <circle cx="${nx + NODE_W / 2}" cy="${ny + 32}" r="22" fill="#3D6F42" opacity="0.15"/>
-  <text x="${nx + NODE_W / 2}" y="${ny + 37}" text-anchor="middle" font-size="13" font-weight="600" fill="#1f2937">${n.person.firstName}</text>
-  <text x="${nx + NODE_W / 2}" y="${ny + 55}" text-anchor="middle" font-size="11" fill="#6b7280">${n.person.lastName}</text>
+  <text x="${nx + NODE_W / 2}" y="${ny + 37}" text-anchor="middle" font-size="13" font-weight="600" fill="#1f2937">${n.person.first_name}</text>
+  <text x="${nx + NODE_W / 2}" y="${ny + 55}" text-anchor="middle" font-size="11" fill="#6b7280">${n.person.last_name}</text>
   <text x="${nx + NODE_W / 2}" y="${ny + 72}" text-anchor="middle" font-size="10" fill="#9ca3af">${birthY} ${deathY}</text>`;
       });
 
@@ -330,7 +330,7 @@ export function TreeCanvas() {
                           className="w-full text-left px-4 py-2 hover:bg-gray-50 text-sm transition-colors"
                           onClick={() => handleSearchSelect(p)}
                         >
-                          <span className="font-medium text-gray-900">{p.firstName} {p.lastName}</span>
+                          <span className="font-medium text-gray-900">{p.first_name} {p.last_name}</span>
                           {p.birthDate && (
                             <span className="text-gray-500 ml-2">{new Date(p.birthDate).getFullYear()}</span>
                           )}
